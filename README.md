@@ -12,7 +12,7 @@ Specific Language - DSL) and automatic code generation.
     * Poisson with two variations, one shows how to check Stiffness Matrix inputs;
     * Transient linear parabolic (transient Poisson);
     * Transient linear reaction-diffusion with a simple exponential growth as reaction 
-    term (inspired by simple Tumor Growth);
+    term (inspired by simplified Tumor Growth);
     * Non-linear steady-state Helmholtz based on the example provided by 
     [Firedrake's repo](https://github.com/firedrakeproject/firedrake);
     * Gray-Scott non-linear transient reaction-diffusion system of PDE (two coupled PDEs),
