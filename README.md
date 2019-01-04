@@ -10,7 +10,7 @@ Specific Language - DSL) and automatic code generation.
 
 * 1D cases:
     * Poisson with two variations, one shows how to check Stiffness Matrix inputs;
-    * Transient linear parabolic (transient Poisson);
+    * Linear parabolic (transient Poisson);
     * Transient linear reaction-diffusion with a simple exponential growth as reaction 
     term (inspired by simplified Tumor Growth);
     * Gray-Scott non-linear transient reaction-diffusion system of PDE (two coupled PDEs),
