@@ -24,7 +24,8 @@ Specific Language - DSL) and automatic code generation.
     * Non-linear steady-state Helmholtz based on the example provided by 
     [Firedrake's repo](https://github.com/firedrakeproject/firedrake);
     * Non-linear Darcy flow inspired by compressible gas flow in a rigid porous media
-    with low permeability, such as reservoir composed by Shale rocks.
+    with low permeability, such as reservoir composed by Shale rocks. There is two cases
+    exemplifying how to plot results in two fashions: VTK files and matplotlib/Firedrake. 
 
 ## About Me
 
