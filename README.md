@@ -13,8 +13,6 @@ Specific Language - DSL) and automatic code generation.
     * Transient linear parabolic (transient Poisson);
     * Transient linear reaction-diffusion with a simple exponential growth as reaction 
     term (inspired by simplified Tumor Growth);
-    * Non-linear steady-state Helmholtz based on the example provided by 
-    [Firedrake's repo](https://github.com/firedrakeproject/firedrake);
     * Gray-Scott non-linear transient reaction-diffusion system of PDE (two coupled PDEs),
     a very interesting case which exhibits self-replication in autocatalytic gel reactors.
     The code reproduces studies provided in this [paper](https://www.sciencedirect.com/science/article/pii/S0022247X15007957?via%3Dihub);
@@ -22,6 +20,9 @@ Specific Language - DSL) and automatic code generation.
     * Linear Darcy flow with heterogeneous (discontinuous) permeability coefficient;
     * Non-linear transient Darcy flow coupled with Peng-Robinson Equation of States (PR-EoS) to mimic
     compressible flow in rigid porous media with low permeability (inspired in Shale rocks).
+* 2D cases:
+    * Non-linear steady-state Helmholtz based on the example provided by 
+    [Firedrake's repo](https://github.com/firedrakeproject/firedrake);
 
 ## About Me
 
