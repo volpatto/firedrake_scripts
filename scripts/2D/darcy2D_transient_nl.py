@@ -11,7 +11,6 @@ mesh = RectangleMesh(numel_x, numel_y, Lx, Ly, quadrilateral=True)
 # Function space declaration
 degree = 1  # Polynomial degree of approximation
 V = FunctionSpace(mesh, "CG", degree)
-Vref = FunctionSpace(mesh, "CG", 1)
 
 # Essential boundary conditions
 boundary_value_left = 5e5
