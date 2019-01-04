@@ -19,11 +19,11 @@ Specific Language - DSL) and automatic code generation.
     * Linear Darcy flow with homogeneous permeability coefficient;
     * Linear Darcy flow with heterogeneous (discontinuous) permeability coefficient;
     * Non-linear transient Darcy flow coupled with Peng-Robinson Equation of States (PR-EoS) to mimic
-    compressible flow in rigid porous media with low permeability (inspired in Shale rocks).
+    compressible flow in rigid porous medium with low permeability (inspired in Shale rocks).
 * 2D cases:
     * Non-linear steady-state Helmholtz based on the example provided by 
     [Firedrake's repo](https://github.com/firedrakeproject/firedrake);
-    * Non-linear Darcy flow inspired by compressible gas flow in a rigid porous media
+    * Non-linear Darcy flow inspired by compressible gas flow in a rigid porous medium
     with low permeability, such as reservoir composed by Shale rocks. There is two cases
     exemplifying how to plot results in two fashions: VTK files and matplotlib/Firedrake. 
 
