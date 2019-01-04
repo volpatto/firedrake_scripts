@@ -3,10 +3,10 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 # Mesh definition
-numel = 200
-L = 10.0
-x_left, x_right = 0.0, L
-mesh = IntervalMesh(numel, x_left, x_right)
+numel_x = 20
+numel_y = 20
+Lx, Ly = 10.0, 40.0
+mesh = RectangleMesh(numel_x, numel_y, Lx, Ly, quadrilateral=True)
 
 # Function space declaration
 degree = 1  # Polynomial degree of approximation
@@ -19,7 +19,7 @@ bc_left = DirichletBC(V, boundary_value_left, 1)  # Boundary condition in 1 mark
 bcs = [bc_left]
 
 # Trial and Test functions
-p = Function(V)
+p = Function(V, name="Pressure")
 p_k = Function(V)
 v = TestFunction(V)
 
@@ -80,13 +80,13 @@ solver_parameters = {
     'pc_type': 'lu'
 }
 
+# Initializing vtk output file
+outfile = File("../outputs/pressure_field.pvd")
+outfile.write(p, time=0)
+
 # Iterating and solving over the time
 t = dt
 step = 0
-x_values = mesh.coordinates.vector().dat.data
-sol_values = []
-p_values_deg1 = []
-psol_deg1 = Function(Vref)
 while t <= T_total:
     step += 1
     print('============================')
@@ -95,43 +95,7 @@ while t <= T_total:
     print('============================')
 
     solve(F == 0, p, bcs=bcs, solver_parameters=solver_parameters)
-    sol_vec = np.array(p.vector().dat.data)
-    sol_values.append(sol_vec)
-    psol_deg1.project(p)
-    p_vec_deg1 = np.array(psol_deg1.vector().dat.data)
-    p_values_deg1.append(p_vec_deg1)
     p_k.assign(p)
 
+    outfile.write(p, time=t)
     t += dt
-
-# *** Plotting ***
-
-# Setting up the figure object
-fig = plt.figure(dpi=300, figsize=(8, 6))
-ax = plt.subplot(111)
-
-# Plotting the data
-steps_to_plot = [1, 10, 30, 60, 120, 360, 480]
-for i in steps_to_plot:
-    ax.plot(x_values, p_values_deg1[i-1] / 1e3, label=('Day %i' % (i)))
-
-# Getting and setting the legend
-box = ax.get_position()
-ax.set_position([box.x0, box.y0, 1.05 * box.width, box.height])
-ax.legend(loc='center left', bbox_to_anchor=(1, 0.5))
-
-# Setting the xy-labels
-plt.xlabel(r'$x$ [m]')
-plt.ylabel(r'Pressure [kPa]')
-plt.xlim(x_values.min(), x_values.max())
-
-# Setting the grids in the figure
-plt.minorticks_on()
-plt.grid(True)
-plt.grid(False, linestyle='--', linewidth=0.5, which='major')
-plt.grid(False, linestyle='--', linewidth=0.1, which='minor')
-
-# Displaying the plot
-plt.tight_layout()
-plt.savefig('compressible-flow.png')
-#plt.show()
