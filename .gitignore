@@ -1,0 +1,8 @@
+# Outputs
+*.pvd
+*.vtu
+*.png
+
+# Folders
+.ipynb_checkpoints/
+.idea/
