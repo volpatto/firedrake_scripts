@@ -25,7 +25,9 @@ Specific Language - DSL) and automatic code generation.
     [Firedrake's repo](https://github.com/firedrakeproject/firedrake);
     * Non-linear Darcy flow inspired by compressible gas flow in a rigid porous medium
     with low permeability, such as reservoir composed by Shale rocks. There is two cases
-    exemplifying how to plot results in two fashions: VTK files and matplotlib/Firedrake. 
+    exemplifying how to plot results in two fashions: VTK files and matplotlib/Firedrake;
+    * (Primal) Linear elasticity problem based on the example provided by [Firedrake's
+    notebooks](https://nbviewer.jupyter.org/github/firedrakeproject/firedrake/blob/master/docs/notebooks/example-elasticity.ipynb).
 
 ## About Me
 
