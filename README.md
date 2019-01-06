@@ -24,8 +24,12 @@ Specific Language - DSL) and automatic code generation.
     * Non-linear steady-state Helmholtz based on the example provided by 
     [Firedrake's repo](https://github.com/firedrakeproject/firedrake);
     * Non-linear Darcy flow inspired by compressible gas flow in a rigid porous medium
-    with low permeability, such as reservoir composed by Shale rocks. There is two cases
-    exemplifying how to plot results in two fashions: VTK files and matplotlib/Firedrake;
+    with low permeability, such as reservoir composed by Shale rocks. There are
+    slightly distinct sub-cases: 
+        - With .pvd (Paraview compatible) output files (solved with Newton method);
+        - With matplotlib/Firedrake output (solved with Newton method);
+        - A case exemplifying how to implement Picard linearization within Firedrake for
+        non-linear problems;
     * (Primal) Linear elasticity problem based on the example provided by [Firedrake's
     notebooks](https://nbviewer.jupyter.org/github/firedrakeproject/firedrake/blob/master/docs/notebooks/example-elasticity.ipynb).
 
