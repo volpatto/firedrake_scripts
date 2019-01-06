@@ -1,7 +1,7 @@
 # Firedrake Scripts
 
 This repo contains several MWE (minimal working examples) scripts which exemplify the usage of Finite Element Methods (FEM)
-to solve some problems I faced around or the ones I found interesting. The implementation
+to solve some problems I faced around or the ones I found interest. The implementation
 is done with [Firedrake Project](https://www.firedrakeproject.org/) framework, a very
 powerful FEM toolkit that provides a Python high-level syntax (more specifically, a Domain
 Specific Language - DSL) and automatic code generation.
