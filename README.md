@@ -19,7 +19,10 @@ Specific Language - DSL) and automatic code generation.
     * Linear Darcy flow with homogeneous permeability coefficient;
     * Linear Darcy flow with heterogeneous (discontinuous) permeability coefficient;
     * Non-linear transient Darcy flow coupled with Peng-Robinson Equation of States (PR-EoS) to mimic
-    compressible flow in rigid porous medium with low permeability (inspired in Shale rocks).
+    compressible flow in rigid porous medium with low permeability (inspired in Shale rocks);
+    * A generic reaction-diffusion with high Damkohler number (low diffusion coefficient,
+    high reaction rate coefficient) stabilized with GGLS (Galerkin-gradient/least-squares)
+    which was proposed [in this paper](https://www.sciencedirect.com/science/article/pii/0045782589900856).
 * 2D cases:
     * Non-linear steady-state Helmholtz based on the example provided by 
     [Firedrake's repo](https://github.com/firedrakeproject/firedrake);
@@ -31,7 +34,10 @@ Specific Language - DSL) and automatic code generation.
         - A case exemplifying how to implement Picard linearization within Firedrake for
         non-linear problems;
     * (Primal) Linear elasticity problem based on the example provided by [Firedrake's
-    notebooks](https://nbviewer.jupyter.org/github/firedrakeproject/firedrake/blob/master/docs/notebooks/example-elasticity.ipynb).
+    notebooks](https://nbviewer.jupyter.org/github/firedrakeproject/firedrake/blob/master/docs/notebooks/example-elasticity.ipynb);
+    * The extensions to 2D of a generic scalar reaction-diffusion with high Damkohler number
+    stabilized with the [GGLS](https://www.sciencedirect.com/science/article/pii/0045782589900856)
+    method.
 
 ## About Me
 
