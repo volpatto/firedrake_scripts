@@ -6,8 +6,8 @@ plt.rc('text', usetex=True)
 plt.rc('font', size=14)
 
 # Mesh definition
-numel_x = 20
-numel_y = 20
+numel_x = 10
+numel_y = 10
 Lx, Ly = 1.0, 1.0
 mesh = RectangleMesh(numel_x, numel_y, Lx, Ly, quadrilateral=True)
 
@@ -64,3 +64,9 @@ plt.show()
 # Writing the solution in pvd/vtu
 outfile = File("../outputs/ggls2d.pvd")
 outfile.write(u_sol)
+
+# Plotting the matrix entries for the case
+A = assemble(a, bcs=bcs)
+A_entries = A.M.values
+plt.spy(A_entries)
+plt.show()

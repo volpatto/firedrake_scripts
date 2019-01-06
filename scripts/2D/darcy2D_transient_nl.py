@@ -69,8 +69,9 @@ kappa = Constant(1e-18)  # Permeability
 mu = Constant(1e-5)  # Methane's viscosity
 
 # Residual variational formulation
-F = phi * inner((fp(p) - fp(p_k)) / dt, v) * dx + (kappa / mu) * inner(fp(p) * grad(p), grad(v)) * dx
-F -= f * v * dx
+a = phi * inner((fp(p) - fp(p_k)) / dt, v) * dx + (kappa / mu) * inner(fp(p) * grad(p), grad(v)) * dx
+L = f * v * dx
+F = a - L
 
 # Solver parameters
 solver_parameters = {

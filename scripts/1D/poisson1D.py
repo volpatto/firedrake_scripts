@@ -6,7 +6,7 @@ numel = 10
 mesh = UnitIntervalMesh(numel)
 
 # Function space declaration
-p = 1  # Polynomial degree of approximation
+p = 3  # Polynomial degree of approximation
 V = FunctionSpace(mesh, "CG", p)
 
 # Essential boundary condition
@@ -33,8 +33,10 @@ b = assemble(L)
 # Applying the essential boundary conditions to load vector
 bc.apply(b)
 
-# Printing the stiffness matrix entries
-print(A.M.values)
+# Printing the stiffness matrix entries and plotting
+A_entries = A.M.values
+plt.spy(A_entries)
+plt.show()
 
 # Solving the resultant linear problem Au = b
 u = Function(V)  # Declaring the unknown as a function in the V space
