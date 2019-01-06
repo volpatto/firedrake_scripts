@@ -6,7 +6,7 @@ numel = 10
 mesh = UnitIntervalMesh(numel)
 
 # Function space declaration
-p = 3  # Polynomial degree of approximation
+p = 1  # Polynomial degree of approximation
 V = FunctionSpace(mesh, "CG", p)
 
 # Essential boundary condition
