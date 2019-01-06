@@ -6,7 +6,7 @@ plt.rc('font', size=14)
 
 Lx, Ly = 1.0, 0.1
 numel_x, numel_y = 50, 20
-mesh = RectangleMesh(numel_x, numel_y, Lx, Ly)
+mesh = RectangleMesh(numel_x, numel_y, Lx, Ly, quadrilateral=True)
 
 # Defining the vector function space to primal solution of linear elasticity problem
 V = VectorFunctionSpace(mesh, "CG", 1)
