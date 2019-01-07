@@ -10,7 +10,7 @@ numel = 400
 L = 250.0
 x_left, x_right = -L, L
 mesh = IntervalMesh(numel, x_left, x_right)
-x = mesh.coordinates
+x, = mesh.coordinates
 
 # Function space declaration
 degree = 1  # Polynomial degree of approximation
@@ -27,28 +27,17 @@ v0 = Constant(0.0)
 v1 = Constant(0.0)
 beta = Constant(0.2)
 
+# Initial condition parameters
+lambda_1 = beta / sqrt(Constant(2.0))
+lambda_2 = 1.0 / sqrt(Constant(2.0))
+phi_1 = Constant(100)
+phi_2 = Constant(-100)
+xi1 = x + phi_1
+xi2 = x + phi_2
 
-# class InitialCondition(Expression):  # TODO: fix this, don't work
-#     def eval(self, values, x):
-#         lambda_1 = Expression(beta / sqrt(Constant(2.0)))
-#         lambda_2 = Expression(1.0 / sqrt(Constant(2.0)))
-#         phi_1 = Constant(100)
-#         phi_2 = Constant(-100)
-#         xi1 = Expression(x[0] + phi_1)
-#         xi2 = Expression(x[0] + phi_2)
-#         values[0] = (beta * exp(lambda_1 * xi1) + exp(lambda_2 * xi2)) / (1.0 + exp(lambda_1 * xi1) + exp(lambda_2 * xi2))
-
-class InitialCondition(Expression):
-    def eval(self, values, x):
-        if x[0] < -50.0:
-            values[0] = 0.0
-        elif x[0] > 50.0:
-            values[0] = 1
-        else:
-            values[0] = x[0] / 100. + 0.5
-
-
-u0 = interpolate(InitialCondition(), V)
+# Setting the initial condition
+expr = (beta * exp(lambda_1 * xi1) + exp(lambda_2 * xi2)) / (1.0 + exp(lambda_1 * xi1) + exp(lambda_2 * xi2))
+u0 = interpolate(expr, V)
 
 
 # Non-linear reaction term function
@@ -138,3 +127,4 @@ plt.grid(False, linestyle='--', linewidth=0.1, which='minor')
 plt.tight_layout()
 plt.savefig('allee.png')
 # plt.show()
+
