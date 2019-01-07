@@ -22,7 +22,10 @@ Specific Language - DSL) and automatic code generation.
     compressible flow in rigid porous medium with low permeability (inspired in Shale rocks);
     * A generic reaction-diffusion with high Damkohler number (low diffusion coefficient,
     high reaction rate coefficient) stabilized with GGLS (Galerkin-gradient/least-squares)
-    which was proposed [in this paper](https://www.sciencedirect.com/science/article/pii/0045782589900856).
+    which was proposed [in this paper](https://www.sciencedirect.com/science/article/pii/0045782589900856);
+    * A simplified Population Dynamics case (reaction-diffusion, advection can be considered) with Allee effect 
+    reproducing the results available [in this paper](https://www.sciencedirect.com/science/article/pii/S0304380005003741).
+    The present result plotted in the code is a reproduction of Fig. 3.
 * 2D cases:
     * Non-linear steady-state Helmholtz based on the example provided by 
     [Firedrake's repo](https://github.com/firedrakeproject/firedrake);

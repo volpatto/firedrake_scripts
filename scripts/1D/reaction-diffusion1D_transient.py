@@ -11,8 +11,8 @@ x_left, x_right = -1.0, 1.0
 mesh = IntervalMesh(numel, x_left, x_right)
 
 # Function space declaration
-p = 1  # Polynomial degree of approximation
-V = FunctionSpace(mesh, "CG", p)
+degree = 1  # Polynomial degree of approximation
+V = FunctionSpace(mesh, "CG", degree)
 
 # Essential boundary conditions
 boundary_value = 0.0

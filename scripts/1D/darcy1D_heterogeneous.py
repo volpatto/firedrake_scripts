@@ -11,11 +11,9 @@ degree = 1  # Polynomial degree of approximation
 V = FunctionSpace(mesh, "CG", degree)
 
 # Essential boundary conditions
-# boundary_value = 0.0
-# bc = DirichletBC(V, boundary_value, [1, 2])  # Boundary condition in 1 and 2 marked bounds (left and right)
 boundary_values = [Constant(0.0), Constant(1.0)]
-bc_left = DirichletBC(V, boundary_values[0], 1)  # Boundary condition in 1 and 2 marked bounds (left and right)
-bc_right = DirichletBC(V, boundary_values[1], 2)  # Boundary condition in 1 and 2 marked bounds (left and right)
+bc_left = DirichletBC(V, boundary_values[0], 1)  # Boundary condition in 1 marked bound (left)
+bc_right = DirichletBC(V, boundary_values[1], 2)  # Boundary condition in 2 marked bound (right)
 
 # Trial and Test functions
 p = TrialFunction(V)
