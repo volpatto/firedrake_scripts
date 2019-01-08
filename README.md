@@ -24,8 +24,12 @@ Specific Language - DSL) and automatic code generation.
     high reaction rate coefficient) stabilized with GGLS (Galerkin-gradient/least-squares)
     which was proposed [in this paper](https://www.sciencedirect.com/science/article/pii/0045782589900856);
     * A simplified Population Dynamics case (reaction-diffusion, advection can be considered) with Allee effect 
-    reproducing the results available [in this paper](https://www.sciencedirect.com/science/article/pii/S0304380005003741).
-    The present result plotted in the code is a reproduction of Fig. 3.
+    reproducing the results available [in this paper](https://www.sciencedirect.com/science/article/pii/S0304380005003741)
+    and exact solution from [this one](https://www.sciencedirect.com/science/article/pii/S0025556403000981).
+    The study is performed only in reaction-diffusion case, although modification to address
+    advective contribution is straightforward (and already present in the code). To solve
+    the problem, classical continuous Galerkin method is used in the space and Crank-Nicolson
+    in the time discretization.
 * 2D cases:
     * Non-linear steady-state Helmholtz based on the example provided by 
     [Firedrake's repo](https://github.com/firedrakeproject/firedrake);

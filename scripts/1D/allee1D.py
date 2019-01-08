@@ -6,11 +6,11 @@ plt.rc('text', usetex=True)
 plt.rc('font', size=14)
 
 # Mesh definition
-numel = 400
+numel = 200
 L = 250.0
 x_left, x_right = -L, L
 mesh = IntervalMesh(numel, x_left, x_right)
-x, = mesh.coordinates
+x = mesh.coordinates
 
 # Function space declaration
 degree = 1  # Polynomial degree of approximation
@@ -27,16 +27,23 @@ v0 = Constant(0.0)
 v1 = Constant(0.0)
 beta = Constant(0.2)
 
-# Initial condition parameters
-lambda_1 = beta / sqrt(Constant(2.0))
-lambda_2 = 1.0 / sqrt(Constant(2.0))
-phi_1 = Constant(100)
-phi_2 = Constant(-100)
-xi1 = x + phi_1
-xi2 = x + phi_2
 
-# Setting the initial condition
-expr = (beta * exp(lambda_1 * xi1) + exp(lambda_2 * xi2)) / (1.0 + exp(lambda_1 * xi1) + exp(lambda_2 * xi2))
+# Exact solution
+def u_exact(t):
+    lambda_1 = beta / sqrt(Constant(2.0))
+    lambda_2 = 1.0 / sqrt(Constant(2.0))
+    n_1 = sqrt(Constant(2.0)) * (1 + beta) - 3 * lambda_1
+    n_2 = sqrt(Constant(2.0)) * (1 + beta) - 3 * lambda_2
+    phi_1 = Constant(100)
+    phi_2 = Constant(-100)
+    xi1 = x[0] - n_1 * t + phi_1
+    xi2 = x[0] - n_2 * t + phi_2
+    expr = (beta * exp(lambda_1 * xi1) + exp(lambda_2 * xi2)) / (1.0 + exp(lambda_1 * xi1) + exp(lambda_2 * xi2))
+    return expr
+
+
+# Setting Initial Condition
+expr = u_exact(0.0)
 u0 = interpolate(expr, V)
 
 
@@ -45,16 +52,32 @@ def reaction_term(u):
     return beta * u - (1.0 + beta) * u * u + u * u * u
 
 
-# Time parameters
-Total_time = 240.
-dt = 1.0
-Dt = Constant(dt)
+# Velocity term
+def v(u):
+    return v0 + v1 * u
 
-# *** Defining residual variational form
-# Temporal advection-diffusion part
-F = inner((u - u0) / Dt, w) * dx + inner(grad(u), grad(w)) * dx + inner((v0 + v1 * u) * grad(u)[0], w) * dx
-# Reaction part
-F += inner(reaction_term(u), w) * dx
+
+# Time parameters
+Total_time = 160.
+dt = 0.1
+Dt = Constant(dt)
+theta = Constant(1.0 / 2.0)
+
+# *** Defining residual variational form with Crank Nicolson method for time discretization
+# Forward temporal diffusion part
+a = inner(u, w) * dx + (theta * Dt) * inner(grad(u), grad(w)) * dx
+# Forward advection part
+a += (theta * Dt) * inner(v(u) * grad(u)[0], w) * dx
+# Forward reaction part
+a += (theta * Dt) * inner(reaction_term(u), w) * dx
+# Backward temporal diffusion part
+L = inner(u0, w) * dx - (theta * Dt) * inner(grad(u0), grad(w)) * dx
+# Backward advection part
+L -= (theta * Dt) * inner(v(u0) * grad(u0)[0], w) * dx
+# Backward reaction part
+L -= (theta * Dt) * inner(reaction_term(u0), w) * dx
+
+F = a - L
 
 # Solver parameters
 solver_parameters = {
@@ -67,46 +90,55 @@ solver_parameters = {
 step = 0
 t = 0.0
 x_values = mesh.coordinates.vector().dat.data
-u_values = []
-u_values_deg1 = []
+u_values = {}
+u_e_values = {}
+u_values_deg1 = {}
 usol_deg1 = Function(Vref)
-# Appending initial condition to solution data
+# Appending initial condition to numerical solution data
 usol_deg1.project(u0)
 u_vec = np.array(u0.vector().dat.data)
-u_values.append(u_vec)
+u_values[step] = u_vec
 u_vec_deg1 = np.array(usol_deg1.vector().dat.data)
-u_values_deg1.append(u_vec_deg1)
+u_values_deg1[step] = u_vec_deg1
+# Appending initial condition to exact solution data
+expr_e = u_exact(t)
+u_e = interpolate(expr_e, Vref)
+u_e_vec = np.array(u_e.vector().dat.data)
+u_e_values[step] = u_e_vec
+# The steps we save to plot
+time_factor = 1.0 / dt
+steps_to_plot = [0, int(time_factor) * 40, int(time_factor) * 80, int(time_factor) * 120, int(time_factor) * 160]
 while t < Total_time:
     step += 1
+    t += dt
     print('============================')
-    print('\ttime =', t)
-    print('\tstep =', step)
+    print(f'\ttime = {t}')
+    print(f'\tstep = {step}')
     print('============================')
 
     solve(F == 0, u, solver_parameters=solver_parameters)
     u0.assign(u)
 
-    usol_deg1.project(u)
-    u_vec = np.array(u.vector().dat.data)
-    u_values.append(u_vec)
-    u_vec_deg1 = np.array(usol_deg1.vector().dat.data)
-    u_values_deg1.append(u_vec_deg1)
-
-    t += dt
+    if step in steps_to_plot:
+        usol_deg1.project(u)
+        u_vec = np.array(u.vector().dat.data)
+        u_values[step] = u_vec
+        u_vec_deg1 = np.array(usol_deg1.vector().dat.data)
+        u_values_deg1[step] = u_vec_deg1
+        expr_e = u_exact(t)
+        u_e = interpolate(expr_e, Vref)
+        u_e_vec = np.array(u_e.vector().dat.data)
+        u_e_values[step] = u_e_vec
 
 # Setting up the figure object
-
 fig = plt.figure(dpi=300, figsize=(8, 6))
 ax = plt.subplot(111)
 
 # Plotting
-ax.plot(x_values, u_values_deg1[0], label='0')
-ax.plot(x_values, u_values_deg1[40], label='40')
-ax.plot(x_values, u_values_deg1[80], label='80')
-ax.plot(x_values, u_values_deg1[120], label='120')
-ax.plot(x_values, u_values_deg1[160], label='160')
-ax.plot(x_values, u_values_deg1[200], label='200')
-ax.plot(x_values, u_values_deg1[step], label='240')
+for index in u_e_values:
+    idx_label = int(index * dt)
+    ax.plot(x_values, u_values_deg1[index], label=f'{idx_label}')
+    ax.plot(x_values, u_e_values[index], '--', label='exact')
 
 # Getting and setting the legend
 box = ax.get_position()
@@ -125,6 +157,4 @@ plt.grid(False, linestyle='--', linewidth=0.5, which='major')
 plt.grid(False, linestyle='--', linewidth=0.1, which='minor')
 
 plt.tight_layout()
-plt.savefig('allee.png')
-# plt.show()
-
+plt.savefig('alleeCN.png')
