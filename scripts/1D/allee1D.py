@@ -59,7 +59,7 @@ def v(u):
 
 # Time parameters
 Total_time = 160.
-dt = 0.1
+dt = 1.0
 Dt = Constant(dt)
 theta = Constant(1.0 / 2.0)
 
