@@ -12,7 +12,9 @@ Specific Language - DSL) and automatic code generation.
     * Poisson with two variations, one shows how to check Stiffness Matrix inputs;
     * Linear parabolic (transient Poisson);
     * Transient linear reaction-diffusion with a simple exponential growth as reaction 
-    term (inspired by simplified Tumor Growth);
+    term (inspired by simplified Tumor Growth). Available timestepping examples:
+        - Crank-Nicolson;
+        - 2nd order Backward Differentiation (BFD2).
     * Gray-Scott non-linear transient reaction-diffusion system of PDE (two coupled PDEs),
     a very interesting case which exhibits self-replication in autocatalytic gel reactors.
     The code reproduces studies provided in this [paper](https://www.sciencedirect.com/science/article/pii/S0022247X15007957?via%3Dihub);
@@ -28,8 +30,10 @@ Specific Language - DSL) and automatic code generation.
     and exact solution from [this one](https://www.sciencedirect.com/science/article/pii/S0025556403000981).
     The study is performed only in reaction-diffusion case, although modification to address
     advective contribution is straightforward (and already present in the code). To solve
-    the problem, classical continuous Galerkin method is used in the space and Crank-Nicolson
-    in the time discretization.
+    the problem, classical continuous Galerkin method. To integrate over the time,
+    there are to MWE provided:
+        - Crank-Nicolson;
+        - 2nd order Backward Differentiation (BFD2).
 * 2D cases:
     * Non-linear steady-state Helmholtz based on the example provided by 
     [Firedrake's repo](https://github.com/firedrakeproject/firedrake);
