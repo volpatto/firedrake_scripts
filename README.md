@@ -12,7 +12,7 @@ Specific Language - DSL) and automatic code generation.
     * Poisson with two variations, one shows how to check Stiffness Matrix inputs;
     * Linear parabolic (transient Poisson);
     * Transient linear reaction-diffusion with a simple exponential growth as reaction 
-    term (inspired by simplified Tumor Growth). Available timestepping examples:
+    term (inspired by simplified Tumor Growth). Available time stepping examples:
         - Crank-Nicolson;
         - 2nd order Backward Differentiation (BFD2).
     * Gray-Scott non-linear transient reaction-diffusion system of PDE (two coupled PDEs),
@@ -21,7 +21,7 @@ Specific Language - DSL) and automatic code generation.
     * Linear Darcy flow with homogeneous permeability coefficient;
     * Linear Darcy flow with heterogeneous (discontinuous) permeability coefficient;
     * Non-linear transient Darcy flow coupled with Peng-Robinson Equation of States (PR-EoS) to mimic
-    compressible flow in rigid porous medium with low permeability (inspired in Shale rocks);
+    compressible flow in rigid porous medium with low permeability (inspired by Shale rocks reservoirs);
     * A generic reaction-diffusion with high Damkohler number (low diffusion coefficient,
     high reaction rate coefficient) stabilized with GGLS (Galerkin-gradient/least-squares)
     which was proposed [in this paper](https://www.sciencedirect.com/science/article/pii/0045782589900856);
