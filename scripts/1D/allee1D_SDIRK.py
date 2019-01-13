@@ -83,9 +83,8 @@ def v(u):
 Total_time = 160.
 dt = 5.0
 Dt = Constant(dt)
-theta = Constant(1.0 / 2.0)
 
-# *** SDIRK constants from Butcher tableau ***
+# *** SDIRK4 constants from Butcher tableau ***
 a_coeff = np.zeros((6, 6))
 b_coeff = np.zeros(6)
 c_coeff = np.zeros(6)

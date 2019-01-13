@@ -13,7 +13,7 @@ mesh = IntervalMesh(numel, x_left, x_right)
 x = mesh.coordinates
 
 # Function space declaration
-degree = 3  # Polynomial degree of approximation
+degree = 1  # Polynomial degree of approximation
 V = FunctionSpace(mesh, "CG", degree)
 W = MixedFunctionSpace((V, V))
 Vref = FunctionSpace(mesh, "CG", 1)
@@ -36,22 +36,36 @@ u_bc = DirichletBC(W.sub(0), boundary_value_u, [1, 2])  # Boundary condition in 
 v_bc = DirichletBC(W.sub(1), boundary_value_v, [1, 2])  # Boundary condition in 1 and 2 marked bounds (left and right)
 
 # Gray-Scott model parameters
-a = 9.0
+a = 1.0
 b = 0.4
 delta_squared = Constant(0.01)
 A = delta_squared * a
 B = delta_squared ** (1. / 3.) * b
 
 # Time parameters
-Total_time = 4000.
+Total_time = 1000.
 dt = 1.0
 Dt = Constant(dt)
+theta = Constant(1.0 / 2.0)
+
+
+# Variational form contribution parts
+def diffusion(u, v, p, q):
+    diffusion_u = inner(grad(u), grad(p))
+    diffusion_v = inner(delta_squared * grad(v), grad(q))
+    return diffusion_u + diffusion_v
+
+
+def reaction(u, v, p, q):
+    reaction_u = u * v * v * p - A * (Constant(1.0) - u) * p
+    reaction_v = - u * v * v * q + B * v * q
+    return reaction_u + reaction_v
+
 
 # Defining residual variational form
-# ** U part **
-F = inner((u - u0) / Dt, p) * dx + inner(grad(u), grad(p)) * dx + u * v * v * p * dx - A * (1.0 - u) * p * dx
-# ** V part **
-F += inner((v - v0) / Dt, q) * dx + inner(delta_squared * grad(v), grad(q)) * dx - u * v * v * q * dx + B * v * q * dx
+a = u * p * dx + v * q * dx + Dt * theta * diffusion(u, v, p, q) * dx + Dt * theta * reaction(u, v, p, q) * dx
+L = u0 * p * dx + v0 * q * dx - Dt * theta * diffusion(u0, v0, p, q) * dx - Dt * theta * reaction(u0, v0, p, q) * dx
+F = a - L
 
 # Solver parameters
 solver_parameters = {
@@ -121,7 +135,7 @@ plt.grid(False, linestyle='--', linewidth=0.5, which='major')
 plt.grid(False, linestyle='--', linewidth=0.1, which='minor')
 
 plt.tight_layout()
-plt.savefig('gray-scott.png')
+plt.savefig('gray-scott_CN.png')
 # plt.show()
 
 # Colormap
@@ -131,5 +145,5 @@ p = plt.imshow(Vplot, origin="lower", aspect='auto', cmap='jet')
 clb = plt.colorbar(p)
 plt.xlabel(r'x')
 plt.ylabel(r't')
-plt.savefig('gray-scott-pattern.png')
+plt.savefig('gray-scott-pattern_CN.png')
 # plt.show()
