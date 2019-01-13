@@ -115,8 +115,7 @@ u_e_vec = np.array(u_e.vector().dat.data)
 u_e_values[step] = u_e_vec
 # The steps we save to plot
 time_factor = 1.0 / dt
-steps_to_plot = [0, int(time_factor) * 40, int(time_factor) * 80, int(time_factor) * 120, int(time_factor) * 160]
-# steps_to_plot = [0, 20, 40, 60, 80]
+steps_to_plot = [0, int(time_factor * 40), int(time_factor * 80), int(time_factor * 120), int(time_factor * 160)]
 while t < Total_time:
     step += 1
     t += dt

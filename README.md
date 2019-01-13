@@ -31,9 +31,13 @@ Specific Language - DSL) and automatic code generation.
     The study is performed only in reaction-diffusion case, although modification to address
     advective contribution is straightforward (and already present in the code). To solve
     the problem, classical continuous Galerkin method. To integrate over the time,
-    there are to MWE provided:
+    there are three MWE provided:
         - Crank-Nicolson;
-        - 2nd order Backward Differentiation (BFD2).
+        - 2nd order Backward Differentiation (BFD2);
+        - SDIRK4, a singly diagonally implicit Runge-Kutta scheme of order 4. This method can handle stiff problems,
+        which is required to solve with reaction and complex dynamics. The implementation is based in 
+        [this paper](https://www.sciencedirect.com/science/article/pii/S0021999107000861). A general review of implicit
+        methods for stiff problem can be found in [this report from NASA](https://ntrs.nasa.gov/search.jsp?R=20160005923).
 * 2D cases:
     * Non-linear steady-state Helmholtz based on the example provided by 
     [Firedrake's repo](https://github.com/firedrakeproject/firedrake);
