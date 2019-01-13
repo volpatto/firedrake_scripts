@@ -74,10 +74,6 @@ def spatial_operator(u, w):
     return reaction_term(u) * w - diffusion_advection(u, w)
 
 
-def differential_operator(u):
-    return div(grad(u)) + reaction_term(u)
-
-
 # Velocity term
 def v(u):
     return v0 + v1 * u
@@ -85,7 +81,7 @@ def v(u):
 
 # Time parameters
 Total_time = 160.
-dt = 10.0
+dt = 5.0
 Dt = Constant(dt)
 theta = Constant(1.0 / 2.0)
 
