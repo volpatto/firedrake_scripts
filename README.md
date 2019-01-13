@@ -17,7 +17,10 @@ Specific Language - DSL) and automatic code generation.
         - 2nd order Backward Differentiation (BFD2).
     * Gray-Scott non-linear transient reaction-diffusion system of PDE (two coupled PDEs),
     a very interesting case which exhibits self-replication in autocatalytic gel reactors.
-    The code reproduces studies provided in this [paper](https://www.sciencedirect.com/science/article/pii/S0022247X15007957?via%3Dihub);
+    The code reproduces studies provided in this [paper](https://www.sciencedirect.com/science/article/pii/S0022247X15007957?via%3Dihub).
+    Currently I provide two different implementations for time stepping integration method:
+        - Implicit Euler;
+        - Crank-Nicolson (shows overall better performance and accuracy).
     * Linear Darcy flow with homogeneous permeability coefficient;
     * Linear Darcy flow with heterogeneous (discontinuous) permeability coefficient;
     * Non-linear transient Darcy flow coupled with Peng-Robinson Equation of States (PR-EoS) to mimic
