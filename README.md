@@ -35,7 +35,7 @@ Specific Language - DSL) and automatic code generation.
         - Crank-Nicolson;
         - 2nd order Backward Differentiation (BFD2);
         - SDIRK4, a singly diagonally implicit Runge-Kutta scheme of order 4. This method can handle stiff problems,
-        which is required to solve problems with reaction and complex dynamics. The implementation is based in 
+        which is required to solve problems with reaction and complex dynamics. The implementation is based on 
         [this paper](https://www.sciencedirect.com/science/article/pii/S0021999107000861). A general review of implicit
         methods for stiff problem can be found in [this report from NASA](https://ntrs.nasa.gov/search.jsp?R=20160005923).
 * 2D cases:
