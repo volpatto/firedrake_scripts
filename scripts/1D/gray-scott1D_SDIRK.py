@@ -105,12 +105,8 @@ c_coeff[5] = 1
 
 def sdirk4_solver(u0, v0):
     # SDIRK functions
-    w1 = Function(W)
-    # u1, v1 = split(w1)
-    u1, v1 = w1.split()
     w2 = Function(W)
     u2, v2 = split(w2)
-    # u2, v2 = w2.split()
     w3 = Function(W)
     u3, v3 = split(w3)
     w4 = Function(W)
