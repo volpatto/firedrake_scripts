@@ -66,5 +66,5 @@ Specific Language - DSL) and automatic code generation.
 * Email: [volpatto@lncc.br](volpatto@lncc.br).
 
 I'm a Numerical Developer at [ESSS](https://github.com/ESSS). Also I currently pursue
-a DSc in Computational Modeling at [LNCC](http://www.lncc.br/). Check it out if you are curious about.
+a DSc in Computational Modeling at [LNCC](http://www.lncc.br/). Check it out if you are curious about it.
 Feel free to contact me as well.
