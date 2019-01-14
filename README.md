@@ -21,7 +21,7 @@ Specific Language - DSL) and automatic code generation.
     Currently I provide two different implementations for time stepping integration method:
         - Implicit Euler;
         - Crank-Nicolson (shows overall better performance and accuracy than Implicit Euler);
-        - a singly diagonally implicit Runge-Kutta scheme of order 4 (see [here](https://ntrs.nasa.gov/search.jsp?R=20160005923)).
+        - SDIRK4, a singly diagonally implicit Runge-Kutta scheme of order 4 (see [here](https://ntrs.nasa.gov/search.jsp?R=20160005923)).
         This method is suitable for stiff problems. As Gray-Scott is highly non-linear in reaction terms, it may
         presents some stiff behavior. The method perform better than Crank-Nicolson, but demands more execution time.
     * Linear Darcy flow with homogeneous permeability coefficient;
