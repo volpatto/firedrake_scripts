@@ -36,7 +36,7 @@ u_bc = DirichletBC(W.sub(0), boundary_value_u, [1, 2])  # Boundary condition in 
 v_bc = DirichletBC(W.sub(1), boundary_value_v, [1, 2])  # Boundary condition in 1 and 2 marked bounds (left and right)
 
 # Gray-Scott model parameters
-a = 1.0
+a = 9.0
 b = 0.4
 delta_squared = Constant(0.01)
 A = delta_squared * a
@@ -44,7 +44,7 @@ B = delta_squared ** (1. / 3.) * b
 
 # Time parameters
 Total_time = 1000.
-dt = 1.0
+dt = 5.0
 Dt = Constant(dt)
 theta = Constant(1.0 / 2.0)
 
