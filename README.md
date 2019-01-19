@@ -58,7 +58,9 @@ Specific Language - DSL) and automatic code generation.
     notebooks](https://nbviewer.jupyter.org/github/firedrakeproject/firedrake/blob/master/docs/notebooks/example-elasticity.ipynb);
     * The extensions to 2D of a generic scalar reaction-diffusion with high Damkohler number
     stabilized with the [GGLS](https://www.sciencedirect.com/science/article/pii/0045782589900856)
-    method.
+    method;
+    * Stabilized mixed Finite Element method for Darcy flow as proposed by [Masud and Hughes](https://www.sciencedirect.com/science/article/pii/S0045782502003717);
+    * Stabilized mixed discontinuous Galerkin method for Darcy flow as suggest by [Hughes et al.](https://www.sciencedirect.com/science/article/pii/S0045782505002732).
 
 ## About Me
 
