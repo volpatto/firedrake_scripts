@@ -8,7 +8,7 @@ Specific Language - DSL) and automatic code generation.
 
 # Available scripts
 
-* 1D cases:
+* **1D cases**:
     * Poisson with two variations, one shows how to check Stiffness Matrix inputs;
     * Linear parabolic (transient Poisson);
     * Transient linear reaction-diffusion with a simple exponential growth as reaction 
@@ -44,7 +44,7 @@ Specific Language - DSL) and automatic code generation.
         which is required to solve problems with reaction and complex dynamics. The implementation is based on 
         [this paper](https://www.sciencedirect.com/science/article/pii/S0021999107000861). A general review of DIRK 
         family methods can be found in [this report from NASA](https://ntrs.nasa.gov/search.jsp?R=20160005923).
-* 2D cases:
+* **2D cases**:
     * Non-linear steady-state Helmholtz based on the example provided by 
     [Firedrake's repo](https://github.com/firedrakeproject/firedrake);
     * Non-linear Darcy flow inspired by compressible gas flow in a rigid porous medium
