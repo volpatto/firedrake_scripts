@@ -75,7 +75,7 @@ F -= f * v * dx
 # Solver parameters
 solver_parameters = {
     'mat_type': 'aij',
-    'snes_tyoe': 'newtonls',
+    'snes_type': 'newtonls',
     'pc_type': 'lu'
 }
 

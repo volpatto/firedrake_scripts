@@ -1,5 +1,6 @@
 """
 [Adapted and refactored from Firedrake test suite by Diego Volpatto]
+[Not working! Need to be update replacing deprecated C expressions]
 
 This demo program solves Helmholtz's equation
   - div D(u) grad u(x, y) + kappa u(x,y) = f(x, y)
@@ -32,16 +33,24 @@ def helmholtz(
         kappa,
         alpha,
         parameters={},
-        source=Expression(0.0)
+        source=Constant(0.0)
 ):
     # Define variational problem
     u = Function(V)
     v = TestFunction(V)
     f = Function(V)
     D = 1 + alpha * u * u
-    f.interpolate(source)
+    f.project(source)
     a = (dot(grad(v), D * grad(u)) + kappa * v * u) * dx
     L = f * v * dx
+
+    # Stiffness matrix assembling
+    A = assemble(a, mat_type='aij')
+
+    # Printing the stiffness matrix entries and plotting
+    A_entries = A.M.values
+    plt.spy(A_entries)
+    plt.show()
 
     solve(a - L == 0, u, solver_parameters=parameters)
 
@@ -101,24 +110,23 @@ def run_convergence_test(
 # Creating the mesh and function space
 mesh, V = create_mesh_and_function_space(50, 50, quadrilateral=True)
 
+x, y = SpatialCoordinate(mesh)
+
 # Helmholtz model parameters
-alpha = 0.1
-kappa = 1
+alpha = Constant(0.1)
+kappa = Constant(1)
 
 # Source term
-source = Expression(
-    "-8*pi*pi*%(alpha)s*cos(2*pi*x[0])*cos(2*pi*x[1])\
-    *cos(2*pi*x[1])*cos(2*pi*x[1])*sin(2*pi*x[0])*sin(2*pi*x[0])\
-    - 8*pi*pi*%(alpha)s*cos(2*pi*x[0])*cos(2*pi*x[0])\
-    *cos(2*pi*x[0])*cos(2*pi*x[1])*sin(2*pi*x[1])*sin(2*pi*x[1])\
-    + 8*pi*pi*(%(alpha)s*cos(2*pi*x[0])*cos(2*pi*x[0])\
-    *cos(2*pi*x[1])*cos(2*pi*x[1]) + 1)*cos(2*pi*x[0])*cos(2*pi*x[1])\
-    + %(kappa)s*cos(2*pi*x[0])*cos(2*pi*x[1])"
-    % {'alpha': alpha, 'kappa': kappa}
-)
+source = -8*pi*pi*(alpha)*cos(2*pi*x)*cos(2*pi*y)\
+    *cos(2*pi*y)*cos(2*pi*y)*sin(2*pi*x)*sin(2*pi*x)\
+    - 8*pi*pi*(alpha)*cos(2*pi*x)*cos(2*pi*x)\
+    *cos(2*pi*x)*cos(2*pi*y)*sin(2*pi*y)*sin(2*pi*y)\
+    + 8*pi*pi*((alpha)*cos(2*pi*x)*cos(2*pi*x)\
+    *cos(2*pi*y)*cos(2*pi*y) + 1)*cos(2*pi*x)*cos(2*pi*y) \
+    + (kappa)*cos(2*pi*x)*cos(2*pi*y)
 
 # Exact solution
-sol_exact = Expression("cos(x[0]*2*pi)*cos(x[1]*2*pi)")
+sol_exact = cos(x*2*pi)*cos(y*2*pi)
 
 # Solver parameters
 parameters = {

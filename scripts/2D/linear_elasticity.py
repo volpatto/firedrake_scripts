@@ -5,7 +5,7 @@ plt.rc('text', usetex=True)
 plt.rc('font', size=14)
 
 Lx, Ly = 1.0, 0.1
-numel_x, numel_y = 50, 20
+numel_x, numel_y = 15, 10
 mesh = RectangleMesh(numel_x, numel_y, Lx, Ly, quadrilateral=True)
 
 # Defining the vector function space to primal solution of linear elasticity problem
@@ -44,6 +44,14 @@ bcs = DirichletBC(V, Constant([ux_bc, uy_bc]), [1, 2])  # Dirichlet conditions a
 # Solving the problem
 u_h = Function(V)
 solve(a == L, u_h, bcs=bcs)
+
+# Stiffness matrix assembling
+A = assemble(a, bcs=bcs)
+
+# Printing the stiffness matrix entries and plotting
+A_entries = A.M.values
+plt.spy(A_entries)
+plt.show()
 
 # *** Plotting the displacement ***
 
