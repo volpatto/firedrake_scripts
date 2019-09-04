@@ -48,6 +48,7 @@ Specific Language - DSL) and automatic code generation.
 * **2D cases**:
     * Non-linear steady-state Helmholtz based on the example provided by 
     [Firedrake's repo](https://github.com/firedrakeproject/firedrake);
+    * A simple linear transport problem (advection + diffusion) stabilized with SUPG;
     * Non-linear Darcy flow inspired by compressible gas flow in a rigid porous medium
     with low permeability, such as reservoir composed by Shale rocks. There are
     slightly distinct sub-cases: 
