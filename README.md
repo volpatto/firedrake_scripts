@@ -11,6 +11,7 @@ Specific Language - DSL) and automatic code generation.
 * **1D cases**:
     * Poisson with two variations, one shows how to check Stiffness Matrix inputs;
     * Linear parabolic (transient Poisson);
+    * A simple linear transport problem (advection + diffusion) stabilized with SUPG; 
     * Transient linear reaction-diffusion with a simple exponential growth as reaction 
     term (inspired by simplified Tumor Growth). Available time stepping examples:
         - Crank-Nicolson;
