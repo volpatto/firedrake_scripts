@@ -1,6 +1,9 @@
 from firedrake import *
 import matplotlib.pyplot as plt
 from matplotlib import rc
+import ufl
+
+ufl.set_level(ufl.CRITICAL)
 
 # Mesh definition
 use_quad_mesh = True
@@ -52,8 +55,10 @@ elif p == 2 and use_quad_mesh:
 else:
     raise ValueError("The employed mesh currently has no stabilization parameters available.")
 
-h_k = CellDiameter(mesh)
-b_norm = norm(b)
+# h_k = CellDiameter(mesh)
+h_k = sqrt(2) * CellVolume(mesh) / CellDiameter(mesh)
+# b_norm = norm(b)
+b_norm = sqrt(dot(b, b))
 Pe_k = m_k * b_norm * h_k / (2.0 * k)
 one = Constant(1.0)
 eps_k = conditional(gt(Pe_k, one), one, Pe_k)
