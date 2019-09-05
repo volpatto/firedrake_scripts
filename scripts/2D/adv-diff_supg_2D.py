@@ -1,88 +1,82 @@
-import time
-import os
-import math
 from firedrake import *
 import matplotlib.pyplot as plt
+from matplotlib import rc
 
-# get file name
-fileName = os.path.splitext(__file__)[0]
+# Mesh definition
+use_quad_mesh = True
+number_of_elements_x = 25
+number_of_elements_y = 25
+mesh = UnitSquareMesh(number_of_elements_x, number_of_elements_y, quadrilateral=use_quad_mesh)
 
-# Parameters
-Pe = Constant(1e10)
-t_end = 10
-dt = 0.5
+# Continuous Galerkin function space (degree = 1)
+p = 1
+V = FunctionSpace(mesh, "CG", p)
+VelSpace = VectorFunctionSpace(mesh, "CG", p)
 
-# Create mesh and define function space
-mesh = UnitSquareMesh(40, 40)
-x, y = SpatialCoordinate(mesh)
+# Strong boundary conditions
+u1, u2 = 0.0, 0.0
+g_left = Constant(u1)
+g_right = Constant(u2)
 
-# Define function spaces
-V = FunctionSpace(mesh, "CG", 1)
-VelSpace = VectorFunctionSpace(mesh, "CG", 2)
+# Marking the boundaries
+bc_left = DirichletBC(V, g_left, 1)
+bc_right = DirichletBC(V, g_right, 2)
+dirichlet_condition = [bc_left, bc_right]
 
-ic = conditional(lt((x - 0.3) * (x - 0.3) + (y - 0.3) * (y - 0.3), 0.2 ** 2), 1, 0)
+# Source term
+f = Constant(1)
 
-b_vector = as_vector((-(y - 0.5), x - 0.5))
-b = Function(VelSpace)
-b.interpolate(b_vector)
-
-bc = DirichletBC(V, Constant(0.0), "on_boundary")
-
-# Define unknown and test function(s)
-v = TestFunction(V)
+# Getting trial and test functions
 u = TrialFunction(V)
+v = TestFunction(V)
 
-u0 = Function(V)
-u0.interpolate(ic)
+# Model's parameters
+k = Constant(1e-8)  # Diffusion
+b = Function(VelSpace)
+b.interpolate(as_vector([1.0, 0.0]))  # Advective velocity
 
-# Stabilization
-h = CellDiameter(mesh)
-n = FacetNormal(mesh)
-theta = Constant(1.0)
+# Bilinear form
+a = k * inner(grad(v), grad(u))*dx + dot(b, grad(u)) * v * dx
 
-nb = sqrt(inner(b, b))
-tau = 0.5 * h * pow(4.0 / (Pe * h) + 2.0 * nb, -1.0)
+# Linear form (RHS)
+L = f * v * dx
 
-# first alternative: redefine the test function
-# v = v + tau * inner(b, grad(v))
+# *** Adding residual stabilizing terms ***
+# Stabilizing parameters (based on Franca et al. 1992)
+if p == 1:
+    m_k = 1.0 / 3.0
+elif p == 2 and not use_quad_mesh:
+    m_k = 1.0 / 12.
+elif p == 2 and use_quad_mesh:
+    m_k = 1.0 / 24.
+else:
+    raise ValueError("The employed mesh currently has no stabilization parameters available.")
 
-# second alternative: explicitly write the additional terms
-r = ((1 / dt) * (u - u0) + theta * ((1.0 / Pe) * div(grad(u)) + inner(b, grad(u))) + (1 - theta) * (
-            (1.0 / Pe) * div(grad(u0)) + inner(b, grad(u0)))) * tau * inner(b, grad(v)) * dx
+h_k = CellDiameter(mesh)
+b_norm = norm(b)
+Pe_k = m_k * b_norm * h_k / (2.0 * k)
+one = Constant(1.0)
+eps_k = conditional(gt(Pe_k, one), one, Pe_k)
+tau_k = h_k / (2.0 * b_norm) * eps_k
 
-# Define variational forms
-a0 = (1.0 / Pe) * inner(grad(u0), grad(v)) * dx + inner(b, grad(u0)) * v * dx
-a1 = (1.0 / Pe) * inner(grad(u), grad(v)) * dx + inner(b, grad(u)) * v * dx
+# Residual stabilizing terms
+a += inner((dot(b, grad(u)) - k*div(grad(u))), tau_k * dot(b, grad(v))) * dx
+L += f * tau_k * dot(b, grad(v)) * dx
 
-A = (1 / dt) * inner(u, v) * dx - (1 / dt) * inner(u0, v) * dx + theta * a1 + (1 - theta) * a0
+# Discretizing the variational problem
+u_sol = Function(V)
+problem = LinearVariationalProblem(a, L, u_sol, dirichlet_condition)
 
-F = A + r
-
-# Create files for storing results
-ufile = File("results_%s/u.pvd" % fileName)
-
-u = Function(V)
-problem = LinearVariationalProblem(lhs(F), rhs(F), u, bcs=[bc])
+# Solving the discretized system
 solver = LinearVariationalSolver(problem)
+solver.solve()
 
-u.assign(u0)
+# Writing solution to vtk file
+output_pvd = File("result_supg/sol.pvd")
+output_pvd.write(u_sol)
 
-# Time-stepping
-t = 0.0
-ufile.write(u, time=t)
-
-while t < t_end:
-    print("t =", t, "t_end =", t_end)
-
-    # Compute
-    solver.solve()
-    plot(u)
-
-    # Move to next time step
-    u0.assign(u)
-    t += dt
-
-    # Writing time step solution
-    ufile.write(u, time=0)
-
+# Plotting the solution
+plot(u_sol)
+plt.xlabel(r'$x$')
+plt.ylabel(r'$y$')
 plt.show()
