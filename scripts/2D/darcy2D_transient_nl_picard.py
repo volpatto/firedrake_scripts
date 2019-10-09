@@ -86,7 +86,7 @@ it_max = 100  # Number of Picard iteration limit
 outfile = File("../outputs/pressure_field_picard.pvd")
 
 # Defining the unknown and writing initial condition to output file
-p = Function(V)
+p = Function(V, name='Pressure')
 p.assign(ic)
 outfile.write(p, time=0)
 
