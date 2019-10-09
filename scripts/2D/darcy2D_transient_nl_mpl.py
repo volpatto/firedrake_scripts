@@ -86,6 +86,8 @@ outfile.write(p, time=0)
 # Iterating and solving over the time
 t = dt
 step = 0
+problem = NonlinearVariationalProblem(F, p, bcs=bcs)
+solver = NonlinearVariationalSolver(problem, solver_parameters=solver_parameters)
 while t <= T_total:
     step += 1
     print('============================')
@@ -93,7 +95,7 @@ while t <= T_total:
     print('\tstep =', step)
     print('============================')
 
-    solve(F == 0, p, bcs=bcs, solver_parameters=solver_parameters)
+    solver.solve()
     p_k.assign(p)
 
     outfile.write(p, time=t)
