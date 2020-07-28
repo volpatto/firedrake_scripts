@@ -87,7 +87,7 @@ solver = LinearVariationalSolver(problem)
 solver.solve()
 
 # *** Visualizando com o Matplotlib ***
-plot(u_sol, marker='x', label='Approx')
+plot(u_sol)
 #plot(u_e, label='Exact')
 # Configuracoes de fontes no grafico
 #plt.rc('text',usetex=True)
