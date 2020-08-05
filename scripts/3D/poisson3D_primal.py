@@ -35,14 +35,12 @@ L = f * v * dx
 
 # Solving the system
 solver_parameters = {
-    # In this MWE, let use HYPRE solver
-    'ksp_type': 'cg',
-    'pc_type': 'hypre',
-    'pc_hypre_type': 'boomeramg',
-    'pc_hypre_boomeramg_strong_threshold': 0.75,
-    'pc_hypre_boomeramg_agg_nl': 2,
-    'ksp_rtol': 1e-6,
-    'ksp_atol': 1e-15
+    "mat_type": "aij",
+    "ksp_type": "preonly",
+    "pc_type": "lu",
+    "pc_factor_mat_solver_type": "mumps",
+    # "mat_mumps_icntl_11": None
+    "mat_mumps_icntl_4": "3",
 }
 u_h = Function(V)
 problem = LinearVariationalProblem(a, L, u_h, bcs=bcs)
