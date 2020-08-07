@@ -34,13 +34,22 @@ a = inner(grad(u), grad(v)) * dx
 L = f * v * dx
 
 # Solving the system
+# Use below config to solve with MUMPS
+# solver_parameters = {
+#     "mat_type": "aij",
+#     "ksp_type": "preonly",
+#     "pc_type": "lu",
+#     "pc_factor_mat_solver_type": "mumps",
+#     # "mat_mumps_icntl_11": None
+#     "mat_mumps_icntl_4": "3",
+# }
+# Use below config to solve with GMRES
 solver_parameters = {
-    "mat_type": "aij",
-    "ksp_type": "preonly",
-    "pc_type": "lu",
-    "pc_factor_mat_solver_type": "mumps",
-    # "mat_mumps_icntl_11": None
-    "mat_mumps_icntl_4": "3",
+    'ksp_type': 'gmres',
+    'pc_type': 'bjacobi',
+    'mat_type': 'aij',
+    'ksp_rtol': 1e-3,
+    'ksp_max_it': 2000
 }
 u_h = Function(V)
 problem = LinearVariationalProblem(a, L, u_h, bcs=bcs)
