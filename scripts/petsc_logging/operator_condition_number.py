@@ -4,12 +4,12 @@ import matplotlib.pyplot as plt
 parameters["pyop2_options"]["lazy_evaluation"] = False
 
 # Defining the mesh
-N = 30
+N = 20
 use_quads = True
 mesh = UnitSquareMesh(N, N, quadrilateral=use_quads)
 
 # Function space declaration
-degree = 2  # Polynomial degree of approximation
+degree = 1  # Polynomial degree of approximation
 V = FunctionSpace(mesh, "CG", degree)
 
 # Trial and test functions
