@@ -49,21 +49,14 @@ solver_parameters = {
     'ksp_monitor_singular_value': None,
     'ksp_gmres_restart': 1000
 }
-# The below code only uses SVD
-# solver_parameters = {
-#     'snes_type': 'ksponly',
-#     'ksp_type': 'preonly',
-#     'pc_type': 'svd',
-#     'pc_svd_monitor': None,
-#     'ksp_monitor_singular_value': None,
-#     'pc_factor_mat_solver_type': 'mumps',
-#     'mat_type': 'aij'
-# }
+
 u_h = Function(V)
 problem = LinearVariationalProblem(a, L, u_h, bcs=bcs)
 solver = LinearVariationalSolver(problem, solver_parameters=solver_parameters)
 solver.snes.ksp.setConvergenceHistory()
 solver.solve()
+
+# Retrieving solver information
 max_singular_value, min_singular_value = solver.snes.ksp.computeExtremeSingularValues()
 condition_number = max_singular_value / min_singular_value
 print(f"\n*** Condition number estimate = {condition_number}")
