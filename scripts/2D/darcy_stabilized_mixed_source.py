@@ -1,6 +1,8 @@
 from firedrake import *
+
 try:
     import matplotlib.pyplot as plt
+
     plt.rcParams['contour.corner_mask'] = False
     plt.close('all')
 except:
@@ -39,6 +41,7 @@ k = Constant(5e-5)
 mu = Constant(1.0)
 rho = Constant(0.0)
 g = Constant((0.0, 0.0))
+
 
 # f = conditional(
 #     (x - 25) * (x - 25) + (y - 50) * (y - 50) <= 100,
