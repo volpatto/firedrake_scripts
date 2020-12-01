@@ -8,7 +8,7 @@ except ImportError:
 
 nx, ny = 20, 20
 Lx, Ly = 1.0, 1.0
-quadrilateral = False
+quadrilateral = True
 mesh = UnitSquareMesh(nx, ny, quadrilateral=quadrilateral)
 
 if quadrilateral:
@@ -77,8 +77,9 @@ solver_parameters = {
     'ksp_type': 'gmres',
     'pc_type': 'bjacobi',
     'mat_type': 'aij',
-    'ksp_rtol': 1e-3,
+    'ksp_rtol': 1e-8,
     'ksp_max_it': 2000,
+    'ksp_monitor': None
 }
 
 solve(a == L, solution, bcs=bcs, solver_parameters=solver_parameters)
