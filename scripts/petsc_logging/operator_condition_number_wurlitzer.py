@@ -282,13 +282,89 @@ def solve_poisson_vms(num_elements_x, num_elements_y, degree=1, use_quads=False)
     return u_h, sigma_h
 
 
+def solve_poisson_mixed_RT(num_elements_x, num_elements_y, degree=1, use_quads=False):
+
+    # Defining the mesh
+    mesh = UnitSquareMesh(num_elements_x, num_elements_y, quadrilateral=use_quads)
+
+    # Function space declaration
+    if use_quads:
+        hdiv_family = 'RTCF'
+        pressure_family = 'DQ'
+    else:
+        hdiv_family = 'RT'
+        pressure_family = 'DG'
+
+    U = FunctionSpace(mesh, hdiv_family, degree + 1)
+    V = FunctionSpace(mesh, pressure_family, degree)
+    W = U * V
+
+    # Trial and test functions
+    u, p = TrialFunctions(W)
+    v, q = TestFunctions(W)
+    solution = Function(W)
+
+    # Mesh entities
+    n = FacetNormal(mesh)
+    h = CellDiameter(mesh)
+    x, y = SpatialCoordinate(mesh)
+
+    # Exact solution
+    p_exact = sin(2 * pi * x) * sin(2 * pi * y)
+    exact_solution = Function(V).interpolate(p_exact)
+    exact_solution.rename("Exact pressure", "label")
+
+    # Forcing function
+    f_expression = div(-grad(p_exact))
+    f = Function(V).interpolate(f_expression)
+
+    # Boundaries: Left (1), Right (2), Bottom(3), Top (4)
+    vx = -2 * pi * cos(2 * pi * x) * sin(2 * pi * y)
+    vy = -2 * pi * sin(2 * pi * x) * cos(2 * pi * y)
+    p_boundaries = p_exact
+
+    bc1 = DirichletBC(W[0], as_vector([vx, 0.0]), 1)
+    bc2 = DirichletBC(W[0], as_vector([vx, 0.0]), 2)
+    bc3 = DirichletBC(W[0], as_vector([0.0, vy]), 3)
+    bc4 = DirichletBC(W[0], as_vector([0.0, vy]), 4)
+    bcs = [bc1, bc2, bc3, bc4]
+
+    # Mixed classical terms
+    a = (dot(u, v) - div(v) * p + q * div(u)) * dx
+    L = f * q * dx - p_boundaries * dot(v, n) * ds
+
+    # Solving the system
+    # The below code only uses SVD to estimate the condition number.
+    # Caution is needed since it can be computationally expensive.
+    solver_parameters = {
+        'snes_type': 'ksponly',
+        'ksp_type': 'preonly',
+        'pc_type': 'svd',
+        'pc_svd_monitor': None,
+        'ksp_monitor_singular_value': None,
+        'pc_factor_mat_solver_type': 'mumps',
+        'mat_type': 'aij'
+    }
+    problem = LinearVariationalProblem(a, L, solution, bcs=bcs)
+    solver = LinearVariationalSolver(problem, solver_parameters=solver_parameters)
+    solver.snes.ksp.setConvergenceHistory()
+    solver.solve()
+
+    sigma_h, u_h = solution.split()
+    sigma_h.rename('Velocity', 'label')
+    u_h.rename('Pressure', 'label')
+
+    return u_h, sigma_h
+
+
 out = StringIO()
 with pipes(stdout=out, stderr=STDOUT):
     N = 10
     # u_h = solve_poisson_cg(N, N, degree=1, use_quads=True)
     # u_h, sigma_h = solve_poisson_ls(N, N, degree=1, use_quads=True)
     # u_h, sigma_h = solve_poisson_cgls(N, N, degree=1, use_quads=True)
-    u_h, sigma_h = solve_poisson_vms(N, N, degree=1, use_quads=True)
+    # u_h, sigma_h = solve_poisson_vms(N, N, degree=1, use_quads=False)
+    u_h, sigma_h = solve_poisson_mixed_RT(N, N, degree=1, use_quads=False)
 
 stdout = out.getvalue()
 stdout_as_list = stdout.split()
