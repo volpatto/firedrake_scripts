@@ -1,13 +1,15 @@
 import betterspy as spy
 from firedrake import *
+from firedrake import PETSc
 import matplotlib.pyplot as plt
 from scipy.sparse.linalg import svds
 from scipy.sparse import csr_matrix
+from slepc4py import SLEPc
 
 parameters["pyop2_options"]["lazy_evaluation"] = True
 
 # Defining the mesh
-num_elements_x = num_elements_y = 15
+num_elements_x = num_elements_y = 25
 use_quads = True
 mesh = UnitSquareMesh(num_elements_x, num_elements_y, quadrilateral=use_quads)
 
@@ -72,8 +74,34 @@ zero_tol = 1e-8
 smallest_singular_values = smallest_singular_values[smallest_singular_values > zero_tol]
 condition_number = largest_singular_values.max() / smallest_singular_values.min()
 
-print(f'Condition Number: {condition_number}')
 print(f'Is symmetric? {petsc_mat.isSymmetric(tol=1e-8)}')
+print(f'Condition Number (scipy): {condition_number}')
 
-spy.plot(Mnp, border_width=5, border_color="0")
-plt.show()
+S = SLEPc.SVD()
+S.create()
+S.setOperator(petsc_mat)
+S.setType(SLEPc.SVD.Type.LAPACK)
+S.setWhichSingularTriplets(which=S.Which.LARGEST)
+S.setFromOptions()
+S.solve()
+
+# Create the results vectors
+vr, vi = petsc_mat.getVecs()
+nconv = S.getConverged()
+singular_values_list = list()
+num_of_extreme_singular_values = 5
+if nconv > 0:
+    for i in range(num_of_extreme_singular_values):
+        singular_value_low = S.getSingularTriplet(i, vr, vi)
+        singular_value_high = S.getSingularTriplet(nconv - 1 - i, vr, vi)
+        singular_values_list.append(singular_value_low)
+        singular_values_list.append(singular_value_high)
+
+singular_values = np.array(singular_values_list)
+zero_tol = 1e-8
+singular_values = singular_values[singular_values > zero_tol]
+condition_number_slepc = singular_values.max() / singular_values.min()
+print(f"Condition Number (SLEPc): {condition_number_slepc}")
+
+# spy.plot(Mnp, border_width=5, border_color="0")
+# plt.show()
