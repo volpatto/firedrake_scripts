@@ -8,7 +8,7 @@ except ImportError:
 
 nx, ny = 20, 20
 Lx, Ly = 1.0, 1.0
-quadrilateral = True
+quadrilateral = False
 mesh = UnitSquareMesh(nx, ny, quadrilateral=quadrilateral)
 
 if quadrilateral:
@@ -18,7 +18,7 @@ else:
     hdiv_family = 'RT'
     pressure_family = 'DG'
 
-# plot(mesh)
+# triplot(mesh)
 # plt.axis('off')
 
 degree = 1
@@ -79,7 +79,6 @@ solver_parameters = {
     'mat_type': 'aij',
     'ksp_rtol': 1e-3,
     'ksp_max_it': 2000,
-    'ksp_monitor': False
 }
 
 solve(a == L, solution, bcs=bcs, solver_parameters=solver_parameters)
@@ -90,9 +89,9 @@ u_h.rename('Pressure', 'label')
 output = File('hughes_paper.pvd', project_output=True)
 output.write(sigma_h, u_h, sol_exact, sigma_e)
 
-# plot(sigma_h)
-# plot(u_h)
-# plt.axis('off')
-# plt.show()
+quiver(sigma_h)
+tripcolor(u_h)
+plt.axis('off')
+plt.show()
 
 print("\n*** DoF = %i" % W.dim())
