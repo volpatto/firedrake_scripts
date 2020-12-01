@@ -1,11 +1,13 @@
+import betterspy as spy
 from firedrake import *
+import matplotlib.pyplot as plt
 from scipy.sparse.linalg import svds
 from scipy.sparse import csr_matrix
 
-parameters["pyop2_options"]["lazy_evaluation"] = False
+parameters["pyop2_options"]["lazy_evaluation"] = True
 
 # Defining the mesh
-num_elements_x = num_elements_y = 25
+num_elements_x = num_elements_y = 15
 use_quads = True
 mesh = UnitSquareMesh(num_elements_x, num_elements_y, quadrilateral=use_quads)
 
@@ -66,8 +68,12 @@ Mnp = csr_matrix(petsc_mat.getValuesCSR()[::-1], shape=size)
 
 _, largest_singular_values, _ = svds(Mnp, which="LM")
 _, smallest_singular_values, _ = svds(Mnp, which="SM")
-smallest_singular_values = smallest_singular_values[smallest_singular_values > 1e-10]
+zero_tol = 1e-8
+smallest_singular_values = smallest_singular_values[smallest_singular_values > zero_tol]
 condition_number = largest_singular_values.max() / smallest_singular_values.min()
 
 print(f'Condition Number: {condition_number}')
 print(f'Is symmetric? {petsc_mat.isSymmetric(tol=1e-8)}')
+
+spy.plot(Mnp, border_width=5, border_color="0")
+plt.show()

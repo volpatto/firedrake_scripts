@@ -1,0 +1,5 @@
+scipy
+betterspy
+wurlitzer
+matplotlib
+numpy
