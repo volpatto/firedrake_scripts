@@ -15,7 +15,7 @@ len_h_y = 0.5 * Ly / ny
 quadrilateral = True
 mesh = RectangleMesh(nx, ny, Lx, Ly, quadrilateral=quadrilateral)
 
-plot(mesh)
+triplot(mesh)
 plt.axis('off')
 
 degree = 1
@@ -112,8 +112,8 @@ u_h.rename('Pressure', 'label')
 output = File('darcy_mixed_source.pvd', project_output=True)
 output.write(sigma_h, u_h)
 
-plot(sigma_h)
-plot(u_h)
+quiver(sigma_h)
+tripcolor(u_h)
 plt.axis('off')
 plt.show()
 
