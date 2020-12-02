@@ -5,11 +5,12 @@ import matplotlib.pyplot as plt
 from scipy.sparse.linalg import svds
 from scipy.sparse import csr_matrix
 from slepc4py import SLEPc
+import time
 
 parameters["pyop2_options"]["lazy_evaluation"] = True
 
 # Defining the mesh
-num_elements_x = num_elements_y = 25
+num_elements_x = num_elements_y = 10
 use_quads = True
 mesh = UnitSquareMesh(num_elements_x, num_elements_y, quadrilateral=use_quads)
 
@@ -66,7 +67,12 @@ L += 0.5 * f * div(v) * dx
 A = assemble(a, bcs=bcs, mat_type="aij")
 petsc_mat = A.M.handle
 size = petsc_mat.getSize()
+
+time_begin_scipy = time.time()
+
 Mnp = csr_matrix(petsc_mat.getValuesCSR()[::-1], shape=size)
+Mnp.eliminate_zeros()  # in-place operation
+nnz = Mnp.nnz
 
 _, largest_singular_values, _ = svds(Mnp, which="LM")
 _, smallest_singular_values, _ = svds(Mnp, which="SM")
@@ -74,8 +80,14 @@ zero_tol = 1e-8
 smallest_singular_values = smallest_singular_values[smallest_singular_values > zero_tol]
 condition_number = largest_singular_values.max() / smallest_singular_values.min()
 
+time_scipy = time.time() - time_begin_scipy
+
 print(f'Is symmetric? {petsc_mat.isSymmetric(tol=1e-8)}')
+print(f'nnz: {nnz}')
+print(f'DoFs: {W.dim()}')
 print(f'Condition Number (scipy): {condition_number}')
+
+time_begin_slepc = time.time()
 
 S = SLEPc.SVD()
 S.create()
@@ -101,7 +113,13 @@ singular_values = np.array(singular_values_list)
 zero_tol = 1e-8
 singular_values = singular_values[singular_values > zero_tol]
 condition_number_slepc = singular_values.max() / singular_values.min()
+
+time_slepc = time.time() - time_begin_slepc
+
 print(f"Condition Number (SLEPc): {condition_number_slepc}")
+
+print(f'Time to calculate with SciPy: {time_scipy}')
+print(f'Time to calculate with SLEPc (serial): {time_slepc}')
 
 # spy.plot(Mnp, border_width=5, border_color="0")
 # plt.show()
