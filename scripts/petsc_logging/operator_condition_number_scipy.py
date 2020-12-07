@@ -1,3 +1,4 @@
+import copy
 from firedrake import *
 import numpy as np
 from logging import warning
@@ -60,15 +61,15 @@ def solve_poisson_ls(num_elements_x, num_elements_y, degree=1, use_quads=False):
     # Mesh entities
     x, y = SpatialCoordinate(mesh)
 
-    # Boundaries: Left (1), Right (2), Bottom(3), Top (4)
-    vx = -2 * pi * cos(2 * pi * x) * sin(2 * pi * y)
-    vy = -2 * pi * sin(2 * pi * x) * cos(2 * pi * y)
+    # Exact solution
+    p_exact = sin(2 * pi * x) * sin(2 * pi * y)
+    exact_solution = Function(V).interpolate(p_exact)
+    exact_solution.rename("Exact pressure", "label")
+    sigma_e = Function(U, name='Exact velocity')
+    sigma_e.project(-grad(p_exact))
 
-    bc1 = DirichletBC(W[0], as_vector([vx, 0.0]), 1)
-    bc2 = DirichletBC(W[0], as_vector([vx, 0.0]), 2)
-    bc3 = DirichletBC(W[0], as_vector([0.0, vy]), 3)
-    bc4 = DirichletBC(W[0], as_vector([0.0, vy]), 4)
-    bcs = [bc1, bc2, bc3, bc4]
+    # Dirichlet BCs
+    bcs = DirichletBC(W[0], sigma_e, "on_boundary")
 
     # Least-squares terms
     a = inner(u + grad(p), v + grad(q)) * dx
@@ -113,15 +114,15 @@ def solve_poisson_cgls(num_elements_x, num_elements_y, degree=1, use_quads=False
     h = CellDiameter(mesh)
     x, y = SpatialCoordinate(mesh)
 
-    # Boundaries: Left (1), Right (2), Bottom(3), Top (4)
-    vx = -2 * pi * cos(2 * pi * x) * sin(2 * pi * y)
-    vy = -2 * pi * sin(2 * pi * x) * cos(2 * pi * y)
+    # Exact solution
+    p_exact = sin(2 * pi * x) * sin(2 * pi * y)
+    exact_solution = Function(V).interpolate(p_exact)
+    exact_solution.rename("Exact pressure", "label")
+    sigma_e = Function(U, name='Exact velocity')
+    sigma_e.project(-grad(p_exact))
 
-    bc1 = DirichletBC(W[0], as_vector([vx, 0.0]), 1)
-    bc2 = DirichletBC(W[0], as_vector([vx, 0.0]), 2)
-    bc3 = DirichletBC(W[0], as_vector([0.0, vy]), 3)
-    bc4 = DirichletBC(W[0], as_vector([0.0, vy]), 4)
-    bcs = [bc1, bc2, bc3, bc4]
+    # Dirichlet BCs
+    bcs = DirichletBC(W[0], sigma_e, "on_boundary")
 
     # Mixed classical terms
     a = (dot(u, v) - div(v) * p - q * div(u)) * dx
@@ -171,15 +172,15 @@ def solve_poisson_vms(num_elements_x, num_elements_y, degree=1, use_quads=False)
     h = CellDiameter(mesh)
     x, y = SpatialCoordinate(mesh)
 
-    # Boundaries: Left (1), Right (2), Bottom(3), Top (4)
-    vx = -2 * pi * cos(2 * pi * x) * sin(2 * pi * y)
-    vy = -2 * pi * sin(2 * pi * x) * cos(2 * pi * y)
+    # Exact solution
+    p_exact = sin(2 * pi * x) * sin(2 * pi * y)
+    exact_solution = Function(V).interpolate(p_exact)
+    exact_solution.rename("Exact pressure", "label")
+    sigma_e = Function(U, name='Exact velocity')
+    sigma_e.project(-grad(p_exact))
 
-    bc1 = DirichletBC(W[0], as_vector([vx, 0.0]), 1)
-    bc2 = DirichletBC(W[0], as_vector([vx, 0.0]), 2)
-    bc3 = DirichletBC(W[0], as_vector([0.0, vy]), 3)
-    bc4 = DirichletBC(W[0], as_vector([0.0, vy]), 4)
-    bcs = [bc1, bc2, bc3, bc4]
+    # Dirichlet BCs
+    bcs = DirichletBC(W[0], sigma_e, "on_boundary")
 
     # Mixed classical terms
     a = (dot(u, v) - div(v) * p + q * div(u)) * dx
@@ -261,15 +262,15 @@ def solve_poisson_mixed_RT(num_elements_x, num_elements_y, degree=1, use_quads=F
     # Mesh entities
     x, y = SpatialCoordinate(mesh)
 
-    # Boundaries: Left (1), Right (2), Bottom(3), Top (4)
-    vx = -2 * pi * cos(2 * pi * x) * sin(2 * pi * y)
-    vy = -2 * pi * sin(2 * pi * x) * cos(2 * pi * y)
+    # Exact solution
+    p_exact = sin(2 * pi * x) * sin(2 * pi * y)
+    exact_solution = Function(V).interpolate(p_exact)
+    exact_solution.rename("Exact pressure", "label")
+    sigma_e = Function(U, name='Exact velocity')
+    sigma_e.project(-grad(p_exact))
 
-    bc1 = DirichletBC(W[0], as_vector([vx, 0.0]), 1)
-    bc2 = DirichletBC(W[0], as_vector([vx, 0.0]), 2)
-    bc3 = DirichletBC(W[0], as_vector([0.0, vy]), 3)
-    bc4 = DirichletBC(W[0], as_vector([0.0, vy]), 4)
-    bcs = [bc1, bc2, bc3, bc4]
+    # Dirichlet BCs
+    bcs = DirichletBC(W[0], sigma_e, "on_boundary")
 
     # Mixed classical terms
     a = (dot(u, v) - div(v) * p + q * div(u)) * dx
@@ -312,15 +313,15 @@ def solve_poisson_dgls(num_elements_x, num_elements_y, degree=1, use_quads=False
     h = CellDiameter(mesh)
     x, y = SpatialCoordinate(mesh)
 
-    # Boundaries: Left (1), Right (2), Bottom(3), Top (4)
-    vx = -2 * pi * cos(2 * pi * x) * sin(2 * pi * y)
-    vy = -2 * pi * sin(2 * pi * x) * cos(2 * pi * y)
+    # Exact solution
+    p_exact = sin(2 * pi * x) * sin(2 * pi * y)
+    exact_solution = Function(V).interpolate(p_exact)
+    exact_solution.rename("Exact pressure", "label")
+    sigma_e = Function(U, name='Exact velocity')
+    sigma_e.project(-grad(p_exact))
 
-    bc1 = DirichletBC(W[0], as_vector([vx, 0.0]), 1, method="geometric")
-    bc2 = DirichletBC(W[0], as_vector([vx, 0.0]), 2, method="geometric")
-    bc3 = DirichletBC(W[0], as_vector([0.0, vy]), 3, method="geometric")
-    bc4 = DirichletBC(W[0], as_vector([0.0, vy]), 4, method="geometric")
-    bcs = [bc1, bc2, bc3, bc4]
+    # Dirichlet BCs
+    bcs = DirichletBC(W[0], sigma_e, "on_boundary", method="geometric")
 
     # Average cell size and mesh dependent stabilization
     h_avg = (h("+") + h("-")) / 2.0
@@ -336,8 +337,12 @@ def solve_poisson_dgls(num_elements_x, num_elements_y, degree=1, use_quads=False
     # DG terms
     a += jump(v, n) * avg(p) * dS - avg(q) * jump(u, n) * dS
     # Edge stabilizing terms
-    a += (eta_p / h_avg) * (jump(u, n) * jump(v, n)) * dS
-    a += (eta_u / h_avg) * dot(jump(p, n), jump(q, n)) * dS
+    # ** Badia-Codina based
+    # a += (eta_p / h_avg) * (jump(u, n) * jump(v, n)) * dS
+    # a += (eta_u / h_avg) * dot(jump(p, n), jump(q, n)) * dS
+    # ** Mesh independent terms
+    a += jump(u, n) * jump(v, n) * dS
+    a += dot(jump(p, n), jump(q, n)) * dS
     # Volumetric stabilizing terms
     # a += 0.5 * h * h * div(u) * div(v) * dx
     # a += 0.5 * h * h * inner(curl(u), curl(v)) * dx
@@ -411,15 +416,15 @@ def solve_poisson_dvms(num_elements_x, num_elements_y, degree=1, use_quads=False
     h = CellDiameter(mesh)
     x, y = SpatialCoordinate(mesh)
 
-    # Boundaries: Left (1), Right (2), Bottom(3), Top (4)
-    vx = -2 * pi * cos(2 * pi * x) * sin(2 * pi * y)
-    vy = -2 * pi * sin(2 * pi * x) * cos(2 * pi * y)
+    # Exact solution
+    p_exact = sin(2 * pi * x) * sin(2 * pi * y)
+    exact_solution = Function(V).interpolate(p_exact)
+    exact_solution.rename("Exact pressure", "label")
+    sigma_e = Function(U, name='Exact velocity')
+    sigma_e.project(-grad(p_exact))
 
-    bc1 = DirichletBC(W[0], as_vector([vx, 0.0]), 1, method="geometric")
-    bc2 = DirichletBC(W[0], as_vector([vx, 0.0]), 2, method="geometric")
-    bc3 = DirichletBC(W[0], as_vector([0.0, vy]), 3, method="geometric")
-    bc4 = DirichletBC(W[0], as_vector([0.0, vy]), 4, method="geometric")
-    bcs = [bc1, bc2, bc3, bc4]
+    # Dirichlet BCs
+    bcs = DirichletBC(W[0], sigma_e, "on_boundary", method="geometric")
 
     # Average cell size and mesh dependent stabilization
     h_avg = (h("+") + h("-")) / 2.0
@@ -431,18 +436,22 @@ def solve_poisson_dvms(num_elements_x, num_elements_y, degree=1, use_quads=False
     eta_u = h_avg / L0  # method B in the Badia-Codina paper
 
     # Mixed classical terms
-    a = (dot(u, v) - div(v) * p - q * div(u)) * dx
+    a = (dot(u, v) - div(v) * p + q * div(u)) * dx
     # DG terms
     a += jump(v, n) * avg(p) * dS - avg(q) * jump(u, n) * dS
     # Edge stabilizing terms
-    a += (eta_p / h_avg) * (jump(u, n) * jump(v, n)) * dS
-    a += (eta_u / h_avg) * dot(jump(p, n), jump(q, n)) * dS
+    # ** Badia-Codina based
+    # a += (eta_p / h_avg) * (jump(u, n) * jump(v, n)) * dS
+    # a += (eta_u / h_avg) * dot(jump(p, n), jump(q, n)) * dS
+    # ** Mesh independent (original)
+    a += jump(u, n) * jump(v, n) * dS  # not considered in the original paper
+    a += dot(jump(p, n), jump(q, n)) * dS
     # Volumetric stabilizing terms
     a += 0.5 * inner(u + grad(p), grad(q) - v) * dx
-    # a += 0.5 * h * h * div(u) * div(v) * dx
+    a += 0.5 * h * h * div(u) * div(v) * dx
     # a += 0.5 * h * h * inner(curl(u), curl(v)) * dx
     # L += 0.5 * h * h * f * div(v) * dx
-    a += 0.5 * div(u) * div(v) * dx
+    # a += 0.5 * div(u) * div(v) * dx
     # a += 0.5 * inner(curl(u), curl(v)) * dx
     # L += 0.5 * f * div(v) * dx
 
@@ -511,34 +520,42 @@ def solve_poisson_dls(num_elements_x, num_elements_y, degree=1, use_quads=False)
     h = CellDiameter(mesh)
     x, y = SpatialCoordinate(mesh)
 
-    # Boundaries: Left (1), Right (2), Bottom(3), Top (4)
-    vx = -2 * pi * cos(2 * pi * x) * sin(2 * pi * y)
-    vy = -2 * pi * sin(2 * pi * x) * cos(2 * pi * y)
+    # Exact solution
+    p_exact = sin(2 * pi * x) * sin(2 * pi * y)
+    exact_solution = Function(V).interpolate(p_exact)
+    exact_solution.rename("Exact pressure", "label")
+    sigma_e = Function(U, name='Exact velocity')
+    sigma_e.project(-grad(p_exact))
 
-    bc1 = DirichletBC(W[0], as_vector([vx, 0.0]), 1, method="geometric")
-    bc2 = DirichletBC(W[0], as_vector([vx, 0.0]), 2, method="geometric")
-    bc3 = DirichletBC(W[0], as_vector([0.0, vy]), 3, method="geometric")
-    bc4 = DirichletBC(W[0], as_vector([0.0, vy]), 4, method="geometric")
-    bcs = [bc1, bc2, bc3, bc4]
+    # Dirichlet BCs
+    bcs = DirichletBC(W[0], sigma_e, "on_boundary", method="geometric")
 
     # Average cell size and mesh dependent stabilization
     h_avg = (h("+") + h("-")) / 2.0
 
     # Jump stabilizing parameters based on Badia-Codina stabilized dG method
-    L0 = 1
-    eta_p = L0 * h_avg  # method B in the Badia-Codina paper
+    # L0 = 1
+    # eta_p = L0 * h_avg  # method B in the Badia-Codina paper
+    eta_p = 1
     # eta_p = L0 * L0  # method D in the Badia-Codina paper
-    eta_u = h_avg / L0  # method B in the Badia-Codina paper
-    eta_u_bc = h / L0  # method B in the Badia-Codina paper
+    # eta_u = h_avg / L0  # method B in the Badia-Codina paper
+    eta_u = 1
+    # eta_u_bc = h / L0  # method B in the Badia-Codina paper
+    eta_u_bc = 1
 
     # Least-squares terms
     a = inner(u + grad(p), v + grad(q)) * dx
     a += div(u) * div(v) * dx
     a += inner(curl(u), curl(v)) * dx
     # Edge stabilizing terms
+    # ** Badia-Codina based (better results) **
     a += (eta_p / h_avg) * (jump(u, n) * jump(v, n)) * dS
     a += (eta_u / h_avg) * dot(jump(p, n), jump(q, n)) * dS
     a += (eta_u_bc / h) * p * q * ds
+    # ** Mesh independent **
+    # a += jump(u, n) * jump(v, n) * dS
+    # a += dot(jump(p, n), jump(q, n)) * dS
+    # a += p * q * ds
 
     A = assemble(a, bcs=bcs, mat_type="aij")
     petsc_mat = A.M.handle
@@ -585,7 +602,7 @@ def solve_poisson_dls(num_elements_x, num_elements_y, degree=1, use_quads=False)
     return condition_number, Mnp, number_of_dofs, nnz, is_symmetric
 
 
-N = 10
+N = 5
 (
     condition_number,
     sparse_matrix,
@@ -599,5 +616,16 @@ print(f'nnz: {nnz}')
 print(f'DoFs: {number_of_dofs}')
 print(f'Condition Number: {condition_number}')
 
-plt.spy(sparse_matrix, precision=1e-8)
+# Plotting the resulting matrix
+# plt.spy(sparse_matrix, precision=1e-8)  # unclear results
+Mnp = sparse_matrix.toarray()
+Am = np.ma.masked_values(Mnp, 0, rtol=1e-13)
+my_cmap = copy.copy(plt.cm.get_cmap("winter"))
+my_cmap.set_bad(color="lightgray")
+
+fig, ax = plt.subplots(1, 1)
+ax.matshow(Am, cmap=my_cmap)
+ax.tick_params(length=0)
+ax.set_xticklabels([])
+ax.set_yticklabels([])
 plt.show()
