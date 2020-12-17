@@ -3,3 +3,5 @@ betterspy
 wurlitzer
 matplotlib
 numpy
+attrs
+rope

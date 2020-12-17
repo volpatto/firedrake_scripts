@@ -7,3 +7,6 @@
 .ipynb_checkpoints/
 .idea/
 outputs/
+.history/
+.vscode/
+.pytest_cache/
