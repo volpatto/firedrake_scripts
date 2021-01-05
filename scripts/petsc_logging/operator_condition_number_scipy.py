@@ -5,7 +5,7 @@ import numpy as np
 from logging import warning
 import matplotlib.pyplot as plt
 import matplotlib
-from scipy.sparse.linalg import svds, ArpackNoConvergence
+from scipy.sparse.linalg import svds, eigs, ArpackNoConvergence
 from scipy.sparse import csr_matrix
 from slepc4py import SLEPc
 import pandas as pd
@@ -986,7 +986,7 @@ def solve_poisson_sdhm(num_elements_x, num_elements_y, degree=1, use_quads=False
     bcs = DirichletBC(W.sub(2), p_exact, "on_boundary")
 
     # Hybridization parameter
-    beta_0 = Constant(1.0)
+    beta_0 = Constant(1.0-18)
     beta = beta_0 / h
     beta_avg = beta_0 / h("+")
 
@@ -1018,11 +1018,22 @@ def solve_poisson_sdhm(num_elements_x, num_elements_y, degree=1, use_quads=False
 
     num_of_factors_svd = int(0.5 * number_of_dofs)
     try:
-        _, largest_singular_values, _ = svds(Mnp, k=num_of_factors_svd, which="LM", solver="arpack")
-        _, smallest_singular_values, _ = svds(Mnp, k=num_of_factors_svd, which="SM", solver="arpack")
+        # _, largest_singular_values, _ = svds(Mnp, k=num_of_factors_svd, which="LM", solver="arpack")
+        # _, smallest_singular_values, _ = svds(Mnp, k=num_of_factors_svd, which="SM", solver="arpack")
+        largest_eigenvalues = eigs(Mnp, k=num_of_factors_svd, which="LM", return_eigenvectors=False)
+        real_largest_eigenvalues = largest_eigenvalues.real[abs(largest_eigenvalues.imag) < 1e-3]
+        print(real_largest_eigenvalues)
+        smallest_eigenvalues = eigs(Mnp, k=num_of_factors_svd, which="SM", return_eigenvectors=False)
+        real_smallest_eigenvalues = smallest_eigenvalues.real[abs(smallest_eigenvalues.imag) < 1e-3]
+        print(real_smallest_eigenvalues)
+        # eigs
         zero_tol = 1e-10
-        smallest_singular_values = smallest_singular_values[smallest_singular_values > zero_tol]
-        condition_number = largest_singular_values.max() / smallest_singular_values.min()
+        # smallest_singular_values = smallest_singular_values[smallest_singular_values > zero_tol]
+        # largest_singular_values = largest_singular_values[largest_singular_values > zero_tol]
+        # condition_number = largest_singular_values.max() / smallest_singular_values.min()
+        smallest_eigenvalues = real_smallest_eigenvalues[real_smallest_eigenvalues > zero_tol]
+        largest_eigenvalues = real_largest_eigenvalues[real_largest_eigenvalues > zero_tol]
+        condition_number = largest_eigenvalues.max() / smallest_eigenvalues.min()
     except ArpackNoConvergence:
         warning("SciPy Arpack svds solver has not converged. Using SLEPc to calculate cond. number instead.")
         S = SLEPc.SVD()
@@ -1043,6 +1054,8 @@ def solve_poisson_sdhm(num_elements_x, num_elements_y, degree=1, use_quads=False
             for idx in range(num_of_extreme_singular_values):
                 smallest_singular_values_list.append(S.getValue(idx))
                 largest_singular_values_list.append(S.getValue(nconv - 1 - idx))
+        else:
+            raise RuntimeError("SLEPc has not converged.")
 
         singular_values_list = smallest_singular_values_list + largest_singular_values_list
 
@@ -1252,16 +1265,16 @@ def hp_refinement_cond_number_calculation(
 
 # Solver options
 solvers_options = {
-    "cg": solve_poisson_cg,
-    "cgls": solve_poisson_cgls,
-    "dgls": solve_poisson_dgls,
+    # "cg": solve_poisson_cg,
+    # "cgls": solve_poisson_cgls,
+    # "dgls": solve_poisson_dgls,
     "sdhm": solve_poisson_sdhm,
-    "ls": solve_poisson_ls,
-    "dls": solve_poisson_dls,
-    "lsh": solve_poisson_lsh,
-    "vms": solve_poisson_vms,
-    "dvms": solve_poisson_dvms,
-    "mixed_RT": solve_poisson_mixed_RT,
+    # "ls": solve_poisson_ls,
+    # "dls": solve_poisson_dls,
+    # "lsh": solve_poisson_lsh,
+    # "vms": solve_poisson_vms,
+    # "dvms": solve_poisson_dvms,
+    # "mixed_RT": solve_poisson_mixed_RT,
 }
 
 degree = 1

@@ -14,7 +14,7 @@ parameters["pyop2_options"]["lazy_evaluation"] = False
 PETSc.Log.begin()
 
 # Defining the mesh
-N = 5
+N = 20
 use_quads = True
 mesh = UnitSquareMesh(N, N, quadrilateral=use_quads)
 comm = mesh.comm
@@ -53,14 +53,16 @@ f = Function(V).interpolate(f_expression)
 
 # Dirichlet BCs
 bcs = DirichletBC(W[0], sigma_e, "on_boundary", method="geometric")
+bc_multiplier = DirichletBC(W.sub(2), Constant(0.0), "on_boundary")
 
 # BCs
 p_boundaries = Constant(0.0)
 u_projected = sigma_e
 
 # Hybridization parameter
-beta_0 = Constant(1.0)
-beta = beta_0 / h
+beta_0 = Constant(1.0e-18)
+# beta = beta_0 / h
+beta = beta_0
 beta_avg = beta_0 / h("+")
 
 # Mixed classical terms
@@ -82,22 +84,6 @@ F = a - L
 
 # Solving with Static Condensation
 PETSc.Sys.Print("*******************************************\nSolving using static condensation.\n")
-# params = {
-#     "snes_type": "ksponly",
-#     "mat_type": "matfree",
-#     "pmat_type": "matfree",
-#     "ksp_type": "preonly",
-#     "pc_type": "python",
-#     # Use the static condensation PC for hybridized problems
-#     # and use a direct solve on the reduced system for lambda_h
-#     "pc_python_type": "firedrake.SCPC",
-#     "pc_sc_eliminate_fields": "0, 1",
-#     "condensed_field": {
-#         "ksp_type": "preonly",
-#         "pc_type": "lu",
-#         "pc_factor_mat_solver_type": "mumps",
-#     },
-# }
 params = {
     "snes_type": "ksponly",
     "mat_type": "matfree",
@@ -110,14 +96,13 @@ params = {
     "pc_sc_eliminate_fields": "0, 1",
     "condensed_field": {
         "ksp_type": "preonly",
-        "pc_type": "svd",
-        'pc_svd_monitor': None,
-        'ksp_monitor_singular_value': None,
+        "pc_type": "lu",
         "pc_factor_mat_solver_type": "mumps",
-        'mat_type': 'aij'
+        "ksp_monitor_true_residual": None,
     },
 }
 
+# problem = NonlinearVariationalProblem(F, solution, bcs=bc_multiplier)
 problem = NonlinearVariationalProblem(F, solution)
 solver = NonlinearVariationalSolver(problem, solver_parameters=params)
 solver.snes.ksp.setConvergenceHistory()
