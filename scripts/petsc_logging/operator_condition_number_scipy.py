@@ -1,11 +1,9 @@
 import attr
-import copy
 from firedrake import *
 import numpy as np
 from logging import warning
 import matplotlib.pyplot as plt
 import matplotlib
-from pyop2.exceptions import ArityTypeError
 from scipy.sparse.linalg import svds, eigs, ArpackNoConvergence
 from scipy.sparse import csr_matrix
 from slepc4py import SLEPc
@@ -94,7 +92,6 @@ def plot_matrix_hybrid_full(a_form, bcs=[], **kwargs):
     assembled_form = assemble(a_form, bcs=bcs, mat_type="aij")
     petsc_mat = assembled_form.M.handle
 
-    total_size = petsc_mat.getSize()
     f0_size = assembled_form.M[0, 0].handle.getSize()
     f1_size = assembled_form.M[1, 1].handle.getSize()
 
@@ -176,50 +173,55 @@ def filter_real_part_in_array(array: np.ndarray, imag_threshold: float = 1e-5) -
     return real_part_array
 
 
-def calculate_condition_number(A, num_of_factors, method: str = "scipy"):
-    method = method.lower()
+def calculate_condition_number(
+    A, num_of_factors, 
+    backend: str = "scipy", 
+    imag_threshold: float = 1e-5,
+    zero_tol: float = 1e-10
+):
+    backend = backend.lower()
 
-    if method == "scipy":
+    if backend == "scipy":
         size = A.getSize()
         Mnp = csr_matrix(A.getValuesCSR()[::-1], shape=size)
         Mnp.eliminate_zeros()
 
         largest_eigenvalues = eigs(Mnp, k=num_of_factors, which="LM", return_eigenvectors=False)
-        real_largest_eigenvalues = largest_eigenvalues.real[abs(largest_eigenvalues.imag) < 1e-5]
+        real_largest_eigenvalues = filter_real_part_in_array(largest_eigenvalues, imag_threshold)
 
         smallest_eigenvalues = eigs(Mnp, k=num_of_factors, which="SM", return_eigenvectors=False)
-        real_smallest_eigenvalues = smallest_eigenvalues.real[abs(smallest_eigenvalues.imag) < 1e-5]
+        real_smallest_eigenvalues = filter_real_part_in_array(smallest_eigenvalues, imag_threshold)
 
-        zero_tol = 1e-10
         smallest_eigenvalues = real_smallest_eigenvalues[real_smallest_eigenvalues > zero_tol]
         largest_eigenvalues = real_largest_eigenvalues[real_largest_eigenvalues > zero_tol]
         condition_number = largest_eigenvalues.max() / smallest_eigenvalues.min()
-    elif method == "slepc":
-        S = SLEPc.SVD()
+    elif backend == "slepc":
+        S = SLEPc.EPS()
         S.create()
-        S.setOperator(A)
-        S.setType(SLEPc.SVD.Type.LAPACK)
-        S.setWhichSingularTriplets(which=S.Which.LARGEST)
-        S.setDimensions(A.size[0])
+        S.setOperators(A)
+        is_operator_symmetric = A.isSymmetric(tol=1e-8)
+        if is_operator_symmetric:
+            S.setProblemType(SLEPc.EPS.ProblemType.HEP)
+        else:
+            S.setProblemType(SLEPc.EPS.ProblemType.NHEP)
+        S.setDimensions(nev=num_of_factors, mpd=num_of_factors)
+        S.setTolerances(max_it=1000)
+        S.setWhichEigenpairs(SLEPc.EPS.Which.LARGEST_REAL)
         S.solve()
 
-        # Recovering the solution
-        nconv = int(S.getConverged())
-        smallest_singular_values_list = list()
-        largest_singular_values_list = list()
-        num_of_values_in_list = num_of_factors
-        num_of_extreme_singular_values = num_of_values_in_list if num_of_values_in_list < nconv else nconv
+        nconv = S.getConverged()
+        eigenvalues_list = list()
         if nconv > 0:
-            for idx in range(num_of_extreme_singular_values):
-                smallest_singular_values_list.append(S.getValue(idx))
-                largest_singular_values_list.append(S.getValue(nconv - 1 - idx))
+            for i in range(nconv):
+                eigenval = S.getEigenvalue(i)
+                eigenvalues_list.append(eigenval)
+        else:
+            raise RuntimeError("SLEPc EPS has not converged.")
 
-        singular_values_list = smallest_singular_values_list + largest_singular_values_list
-
-        singular_values = np.array(singular_values_list)
-        zero_tol = 1e-8
-        singular_values = singular_values[singular_values > zero_tol]
-        condition_number = singular_values.max() / singular_values.min()
+        eigenvalues = np.array(eigenvalues_list)
+        eigenvalues = filter_real_part_in_array(eigenvalues, imag_threshold)
+        eigenvalues = eigenvalues[eigenvalues > zero_tol]
+        condition_number = eigenvalues.max() / eigenvalues.min()
     else:
         raise NotImplementedError("The required method for condition number estimation is currently unavailable.")
 
@@ -252,40 +254,8 @@ def solve_poisson_cg(num_elements_x, num_elements_y, degree=1, use_quads=False):
     nnz = Mnp.nnz
     number_of_dofs = V.dim()
 
-    num_of_factors_svd = int(0.5 * number_of_dofs)
-    try:
-        _, largest_singular_values, _ = svds(Mnp, k=num_of_factors_svd, which="LM", solver="arpack")
-        _, smallest_singular_values, _ = svds(Mnp, k=num_of_factors_svd, which="SM", solver="arpack")
-        zero_tol = 1e-10
-        smallest_singular_values = smallest_singular_values[smallest_singular_values > zero_tol]
-        condition_number = largest_singular_values.max() / smallest_singular_values.min()
-    except ArpackNoConvergence:
-        warning("SciPy Arpack svds solver has not converged. Using SLEPc to calculate cond. number instead.")
-        S = SLEPc.SVD()
-        S.create()
-        S.setOperator(petsc_mat)
-        S.setType(SLEPc.SVD.Type.LAPACK)
-        S.setWhichSingularTriplets(which=S.Which.LARGEST)
-        S.setDimensions(petsc_mat.size[0])
-        S.solve()
-
-        # Recovering the solution
-        nconv = int(S.getConverged())
-        smallest_singular_values_list = list()
-        largest_singular_values_list = list()
-        num_of_values_in_list = num_of_factors_svd
-        num_of_extreme_singular_values = num_of_values_in_list if num_of_values_in_list < nconv else nconv
-        if nconv > 0:
-            for idx in range(num_of_extreme_singular_values):
-                smallest_singular_values_list.append(S.getValue(idx))
-                largest_singular_values_list.append(S.getValue(nconv - 1 - idx))
-
-        singular_values_list = smallest_singular_values_list + largest_singular_values_list
-
-        singular_values = np.array(singular_values_list)
-        zero_tol = 1e-8
-        singular_values = singular_values[singular_values > zero_tol]
-        condition_number = singular_values.max() / singular_values.min()
+    num_of_factors = int(0.95 * number_of_dofs) - 1
+    condition_number = calculate_condition_number(petsc_mat, num_of_factors, backend="slepc")
 
     result = ConditionNumberResult(
         form=a,
@@ -342,40 +312,8 @@ def solve_poisson_ls(num_elements_x, num_elements_y, degree=1, use_quads=False):
     nnz = Mnp.nnz
     number_of_dofs = W.dim()
 
-    num_of_factors_svd = int(0.5 * number_of_dofs)
-    try:
-        _, largest_singular_values, _ = svds(Mnp, k=num_of_factors_svd, which="LM", solver="arpack")
-        _, smallest_singular_values, _ = svds(Mnp, k=num_of_factors_svd, which="SM", solver="arpack")
-        zero_tol = 1e-10
-        smallest_singular_values = smallest_singular_values[smallest_singular_values > zero_tol]
-        condition_number = largest_singular_values.max() / smallest_singular_values.min()
-    except ArpackNoConvergence:
-        warning("SciPy Arpack svds solver has not converged. Using SLEPc to calculate cond. number instead.")
-        S = SLEPc.SVD()
-        S.create()
-        S.setOperator(petsc_mat)
-        S.setType(SLEPc.SVD.Type.LAPACK)
-        S.setWhichSingularTriplets(which=S.Which.LARGEST)
-        S.setDimensions(petsc_mat.size[0])
-        S.solve()
-
-        # Recovering the solution
-        nconv = int(S.getConverged())
-        smallest_singular_values_list = list()
-        largest_singular_values_list = list()
-        num_of_values_in_list = num_of_factors_svd
-        num_of_extreme_singular_values = num_of_values_in_list if num_of_values_in_list < nconv else nconv
-        if nconv > 0:
-            for idx in range(num_of_extreme_singular_values):
-                smallest_singular_values_list.append(S.getValue(idx))
-                largest_singular_values_list.append(S.getValue(nconv - 1 - idx))
-
-        singular_values_list = smallest_singular_values_list + largest_singular_values_list
-
-        singular_values = np.array(singular_values_list)
-        zero_tol = 1e-8
-        singular_values = singular_values[singular_values > zero_tol]
-        condition_number = singular_values.max() / singular_values.min()
+    num_of_factors = int(0.95 * number_of_dofs) - 1
+    condition_number = calculate_condition_number(petsc_mat, num_of_factors, backend="scipy")
 
     result = ConditionNumberResult(
         form=a,
@@ -438,40 +376,8 @@ def solve_poisson_cgls(num_elements_x, num_elements_y, degree=1, use_quads=False
     nnz = Mnp.nnz
     number_of_dofs = W.dim()
 
-    num_of_factors_svd = int(0.5 * number_of_dofs)
-    try:
-        _, largest_singular_values, _ = svds(Mnp, k=num_of_factors_svd, which="LM", solver="arpack")
-        _, smallest_singular_values, _ = svds(Mnp, k=num_of_factors_svd, which="SM", solver="arpack")
-        zero_tol = 1e-10
-        smallest_singular_values = smallest_singular_values[smallest_singular_values > zero_tol]
-        condition_number = largest_singular_values.max() / smallest_singular_values.min()
-    except ArpackNoConvergence:
-        warning("SciPy Arpack svds solver has not converged. Using SLEPc to calculate cond. number instead.")
-        S = SLEPc.SVD()
-        S.create()
-        S.setOperator(petsc_mat)
-        S.setType(SLEPc.SVD.Type.LAPACK)
-        S.setWhichSingularTriplets(which=S.Which.LARGEST)
-        S.setDimensions(petsc_mat.size[0])
-        S.solve()
-
-        # Recovering the solution
-        nconv = int(S.getConverged())
-        smallest_singular_values_list = list()
-        largest_singular_values_list = list()
-        num_of_values_in_list = num_of_factors_svd
-        num_of_extreme_singular_values = num_of_values_in_list if num_of_values_in_list < nconv else nconv
-        if nconv > 0:
-            for idx in range(num_of_extreme_singular_values):
-                smallest_singular_values_list.append(S.getValue(idx))
-                largest_singular_values_list.append(S.getValue(nconv - 1 - idx))
-
-        singular_values_list = smallest_singular_values_list + largest_singular_values_list
-
-        singular_values = np.array(singular_values_list)
-        zero_tol = 1e-8
-        singular_values = singular_values[singular_values > zero_tol]
-        condition_number = singular_values.max() / singular_values.min()
+    num_of_factors = int(0.95 * number_of_dofs) - 1
+    condition_number = calculate_condition_number(petsc_mat, num_of_factors, backend="slepc")
 
     result = ConditionNumberResult(
         form=a,
@@ -536,40 +442,8 @@ def solve_poisson_vms(num_elements_x, num_elements_y, degree=1, use_quads=False)
     nnz = Mnp.nnz
     number_of_dofs = W.dim()
 
-    num_of_factors_svd = int(0.5 * number_of_dofs)
-    try:
-        _, largest_singular_values, _ = svds(Mnp, k=num_of_factors_svd, which="LM", solver="arpack")
-        _, smallest_singular_values, _ = svds(Mnp, k=num_of_factors_svd, which="SM", solver="arpack")
-        zero_tol = 1e-10
-        smallest_singular_values = smallest_singular_values[smallest_singular_values > zero_tol]
-        condition_number = largest_singular_values.max() / smallest_singular_values.min()
-    except ArpackNoConvergence:
-        warning("SciPy Arpack svds solver has not converged. Using SLEPc to calculate cond. number instead.")
-        S = SLEPc.SVD()
-        S.create()
-        S.setOperator(petsc_mat)
-        S.setType(SLEPc.SVD.Type.LAPACK)
-        S.setWhichSingularTriplets(which=S.Which.LARGEST)
-        S.setDimensions(petsc_mat.size[0])
-        S.solve()
-
-        # Recovering the solution
-        nconv = int(S.getConverged())
-        smallest_singular_values_list = list()
-        largest_singular_values_list = list()
-        num_of_values_in_list = num_of_factors_svd
-        num_of_extreme_singular_values = num_of_values_in_list if num_of_values_in_list < nconv else nconv
-        if nconv > 0:
-            for idx in range(num_of_extreme_singular_values):
-                smallest_singular_values_list.append(S.getValue(idx))
-                largest_singular_values_list.append(S.getValue(nconv - 1 - idx))
-
-        singular_values_list = smallest_singular_values_list + largest_singular_values_list
-
-        singular_values = np.array(singular_values_list)
-        zero_tol = 1e-8
-        singular_values = singular_values[singular_values > zero_tol]
-        condition_number = singular_values.max() / singular_values.min()
+    num_of_factors = int(0.95 * number_of_dofs) - 1
+    condition_number = calculate_condition_number(petsc_mat, num_of_factors, backend="slepc")
 
     result = ConditionNumberResult(
         form=a,
@@ -628,40 +502,8 @@ def solve_poisson_mixed_RT(num_elements_x, num_elements_y, degree=1, use_quads=F
     nnz = Mnp.nnz
     number_of_dofs = W.dim()
 
-    num_of_factors_svd = int(0.5 * number_of_dofs)
-    try:
-        _, largest_singular_values, _ = svds(Mnp, k=num_of_factors_svd, which="LM", solver="arpack")
-        _, smallest_singular_values, _ = svds(Mnp, k=num_of_factors_svd, which="SM", solver="arpack")
-        zero_tol = 1e-10
-        smallest_singular_values = smallest_singular_values[smallest_singular_values > zero_tol]
-        condition_number = largest_singular_values.max() / smallest_singular_values.min()
-    except ArpackNoConvergence:
-        warning("SciPy Arpack svds solver has not converged. Using SLEPc to calculate cond. number instead.")
-        S = SLEPc.SVD()
-        S.create()
-        S.setOperator(petsc_mat)
-        S.setType(SLEPc.SVD.Type.LAPACK)
-        S.setWhichSingularTriplets(which=S.Which.LARGEST)
-        S.setDimensions(petsc_mat.size[0])
-        S.solve()
-
-        # Recovering the solution
-        nconv = int(S.getConverged())
-        smallest_singular_values_list = list()
-        largest_singular_values_list = list()
-        num_of_values_in_list = num_of_factors_svd
-        num_of_extreme_singular_values = num_of_values_in_list if num_of_values_in_list < nconv else nconv
-        if nconv > 0:
-            for idx in range(num_of_extreme_singular_values):
-                smallest_singular_values_list.append(S.getValue(idx))
-                largest_singular_values_list.append(S.getValue(nconv - 1 - idx))
-
-        singular_values_list = smallest_singular_values_list + largest_singular_values_list
-
-        singular_values = np.array(singular_values_list)
-        zero_tol = 1e-8
-        singular_values = singular_values[singular_values > zero_tol]
-        condition_number = singular_values.max() / singular_values.min()
+    num_of_factors = int(0.95 * number_of_dofs) - 1
+    condition_number = calculate_condition_number(petsc_mat, num_of_factors, backend="slepc")
 
     result = ConditionNumberResult(
         form=a,
@@ -742,40 +584,8 @@ def solve_poisson_dgls(num_elements_x, num_elements_y, degree=1, use_quads=False
     nnz = Mnp.nnz
     number_of_dofs = W.dim()
 
-    num_of_factors_svd = int(0.5 * number_of_dofs)
-    try:
-        _, largest_singular_values, _ = svds(Mnp, k=num_of_factors_svd, which="LM", solver="arpack")
-        _, smallest_singular_values, _ = svds(Mnp, k=num_of_factors_svd, which="SM", solver="arpack")
-        zero_tol = 1e-10
-        smallest_singular_values = smallest_singular_values[smallest_singular_values > zero_tol]
-        condition_number = largest_singular_values.max() / smallest_singular_values.min()
-    except ArpackNoConvergence:
-        warning("SciPy Arpack svds solver has not converged. Using SLEPc to calculate cond. number instead.")
-        S = SLEPc.SVD()
-        S.create()
-        S.setOperator(petsc_mat)
-        S.setType(SLEPc.SVD.Type.LAPACK)
-        S.setWhichSingularTriplets(which=S.Which.LARGEST)
-        S.setDimensions(petsc_mat.size[0])
-        S.solve()
-
-        # Recovering the solution
-        nconv = int(S.getConverged())
-        smallest_singular_values_list = list()
-        largest_singular_values_list = list()
-        num_of_values_in_list = num_of_factors_svd
-        num_of_extreme_singular_values = num_of_values_in_list if num_of_values_in_list < nconv else nconv
-        if nconv > 0:
-            for idx in range(num_of_extreme_singular_values):
-                smallest_singular_values_list.append(S.getValue(idx))
-                largest_singular_values_list.append(S.getValue(nconv - 1 - idx))
-
-        singular_values_list = smallest_singular_values_list + largest_singular_values_list
-
-        singular_values = np.array(singular_values_list)
-        zero_tol = 1e-8
-        singular_values = singular_values[singular_values > zero_tol]
-        condition_number = singular_values.max() / singular_values.min()
+    num_of_factors = int(0.95 * number_of_dofs) - 1
+    condition_number = calculate_condition_number(petsc_mat, num_of_factors, backend="slepc")
 
     result = ConditionNumberResult(
         form=a,
@@ -857,40 +667,8 @@ def solve_poisson_dvms(num_elements_x, num_elements_y, degree=1, use_quads=False
     nnz = Mnp.nnz
     number_of_dofs = W.dim()
 
-    num_of_factors_svd = int(0.5 * number_of_dofs)
-    try:
-        _, largest_singular_values, _ = svds(Mnp, k=num_of_factors_svd, which="LM", solver="arpack")
-        _, smallest_singular_values, _ = svds(Mnp, k=num_of_factors_svd, which="SM", solver="arpack")
-        zero_tol = 1e-10
-        smallest_singular_values = smallest_singular_values[smallest_singular_values > zero_tol]
-        condition_number = largest_singular_values.max() / smallest_singular_values.min()
-    except ArpackNoConvergence:
-        warning("SciPy Arpack svds solver has not converged. Using SLEPc to calculate cond. number instead.")
-        S = SLEPc.SVD()
-        S.create()
-        S.setOperator(petsc_mat)
-        S.setType(SLEPc.SVD.Type.LAPACK)
-        S.setWhichSingularTriplets(which=S.Which.LARGEST)
-        S.setDimensions(petsc_mat.size[0])
-        S.solve()
-
-        # Recovering the solution
-        nconv = int(S.getConverged())
-        smallest_singular_values_list = list()
-        largest_singular_values_list = list()
-        num_of_values_in_list = num_of_factors_svd
-        num_of_extreme_singular_values = num_of_values_in_list if num_of_values_in_list < nconv else nconv
-        if nconv > 0:
-            for idx in range(num_of_extreme_singular_values):
-                smallest_singular_values_list.append(S.getValue(idx))
-                largest_singular_values_list.append(S.getValue(nconv - 1 - idx))
-
-        singular_values_list = smallest_singular_values_list + largest_singular_values_list
-
-        singular_values = np.array(singular_values_list)
-        zero_tol = 1e-8
-        singular_values = singular_values[singular_values > zero_tol]
-        condition_number = singular_values.max() / singular_values.min()
+    num_of_factors = int(0.95 * number_of_dofs) - 1
+    condition_number = calculate_condition_number(petsc_mat, num_of_factors, backend="slepc")
 
     result = ConditionNumberResult(
         form=a,
@@ -970,40 +748,8 @@ def solve_poisson_dls(num_elements_x, num_elements_y, degree=1, use_quads=False)
     nnz = Mnp.nnz
     number_of_dofs = W.dim()
 
-    num_of_factors_svd = int(0.5 * number_of_dofs)
-    try:
-        _, largest_singular_values, _ = svds(Mnp, k=num_of_factors_svd, which="LM", solver="arpack")
-        _, smallest_singular_values, _ = svds(Mnp, k=num_of_factors_svd, which="SM", solver="arpack")
-        zero_tol = 1e-10
-        smallest_singular_values = smallest_singular_values[smallest_singular_values > zero_tol]
-        condition_number = largest_singular_values.max() / smallest_singular_values.min()
-    except ArpackNoConvergence:
-        warning("SciPy Arpack svds solver has not converged. Using SLEPc to calculate cond. number instead.")
-        S = SLEPc.SVD()
-        S.create()
-        S.setOperator(petsc_mat)
-        S.setType(SLEPc.SVD.Type.LAPACK)
-        S.setWhichSingularTriplets(which=S.Which.LARGEST)
-        S.setDimensions(petsc_mat.size[0])
-        S.solve()
-
-        # Recovering the solution
-        nconv = int(S.getConverged())
-        smallest_singular_values_list = list()
-        largest_singular_values_list = list()
-        num_of_values_in_list = num_of_factors_svd
-        num_of_extreme_singular_values = num_of_values_in_list if num_of_values_in_list < nconv else nconv
-        if nconv > 0:
-            for idx in range(num_of_extreme_singular_values):
-                smallest_singular_values_list.append(S.getValue(idx))
-                largest_singular_values_list.append(S.getValue(nconv - 1 - idx))
-
-        singular_values_list = smallest_singular_values_list + largest_singular_values_list
-
-        singular_values = np.array(singular_values_list)
-        zero_tol = 1e-8
-        singular_values = singular_values[singular_values > zero_tol]
-        condition_number = singular_values.max() / singular_values.min()
+    num_of_factors = int(0.95 * number_of_dofs) - 1
+    condition_number = calculate_condition_number(petsc_mat, num_of_factors, backend="slepc")
 
     result = ConditionNumberResult(
         form=a,
@@ -1084,37 +830,7 @@ def solve_poisson_sdhm(num_elements_x, num_elements_y, degree=1, use_quads=False
     number_of_dofs = Mnp.shape[0]
 
     num_of_factors = int(0.95 * number_of_dofs) - 1
-    try:
-        condition_number = calculate_condition_number(petsc_mat, num_of_factors, method="SciPy")
-    except ArpackNoConvergence:
-        warning("SciPy Arpack svds solver has not converged. Using SLEPc to calculate cond. number instead.")
-        S = SLEPc.SVD()
-        S.create()
-        S.setOperator(petsc_mat)
-        S.setType(SLEPc.SVD.Type.LAPACK)
-        S.setWhichSingularTriplets(which=S.Which.LARGEST)
-        S.setDimensions(petsc_mat.size[0])
-        S.solve()
-
-        # Recovering the solution
-        nconv = int(S.getConverged())
-        smallest_singular_values_list = list()
-        largest_singular_values_list = list()
-        num_of_values_in_list = num_of_factors
-        num_of_extreme_singular_values = num_of_values_in_list if num_of_values_in_list < nconv else nconv
-        if nconv > 0:
-            for idx in range(num_of_extreme_singular_values):
-                smallest_singular_values_list.append(S.getValue(idx))
-                largest_singular_values_list.append(S.getValue(nconv - 1 - idx))
-        else:
-            raise RuntimeError("SLEPc has not converged.")
-
-        singular_values_list = smallest_singular_values_list + largest_singular_values_list
-
-        singular_values = np.array(singular_values_list)
-        zero_tol = 1e-8
-        singular_values = singular_values[singular_values > zero_tol]
-        condition_number = singular_values.max() / singular_values.min()
+    condition_number = calculate_condition_number(petsc_mat, num_of_factors, backend="slepc")
 
     result = ConditionNumberResult(
         form=a,
@@ -1161,8 +877,6 @@ def solve_poisson_lsh(num_elements_x, num_elements_y, degree=1, use_quads=False)
     sigma_e.project(-grad(p_exact))
 
     # BCs
-    u_projected = sigma_e
-    p_boundaries = Constant(0.0)
     bcs = DirichletBC(W.sub(2), p_exact, "on_boundary")
 
     # Hybridization parameter
@@ -1226,40 +940,8 @@ def solve_poisson_lsh(num_elements_x, num_elements_y, degree=1, use_quads=False)
     nnz = Mnp.nnz
     number_of_dofs = Mnp.shape[0]
 
-    num_of_factors_svd = int(0.5 * number_of_dofs)
-    try:
-        _, largest_singular_values, _ = svds(Mnp, k=num_of_factors_svd, which="LM", solver="arpack")
-        _, smallest_singular_values, _ = svds(Mnp, k=num_of_factors_svd, which="SM", solver="arpack")
-        zero_tol = 1e-10
-        smallest_singular_values = smallest_singular_values[smallest_singular_values > zero_tol]
-        condition_number = largest_singular_values.max() / smallest_singular_values.min()
-    except ArpackNoConvergence:
-        warning("SciPy Arpack svds solver has not converged. Using SLEPc to calculate cond. number instead.")
-        S = SLEPc.SVD()
-        S.create()
-        S.setOperator(petsc_mat)
-        S.setType(SLEPc.SVD.Type.LAPACK)
-        S.setWhichSingularTriplets(which=S.Which.LARGEST)
-        S.setDimensions(petsc_mat.size[0])
-        S.solve()
-
-        # Recovering the solution
-        nconv = int(S.getConverged())
-        smallest_singular_values_list = list()
-        largest_singular_values_list = list()
-        num_of_values_in_list = num_of_factors_svd
-        num_of_extreme_singular_values = num_of_values_in_list if num_of_values_in_list < nconv else nconv
-        if nconv > 0:
-            for idx in range(num_of_extreme_singular_values):
-                smallest_singular_values_list.append(S.getValue(idx))
-                largest_singular_values_list.append(S.getValue(nconv - 1 - idx))
-
-        singular_values_list = smallest_singular_values_list + largest_singular_values_list
-
-        singular_values = np.array(singular_values_list)
-        zero_tol = 1e-8
-        singular_values = singular_values[singular_values > zero_tol]
-        condition_number = singular_values.max() / singular_values.min()
+    num_of_factors = int(0.98 * number_of_dofs) - 1
+    condition_number = calculate_condition_number(petsc_mat, num_of_factors, backend="slepc")
 
     result = ConditionNumberResult(
         form=a,
@@ -1320,13 +1002,13 @@ solvers_options = {
     # "cg": solve_poisson_cg,
     # "cgls": solve_poisson_cgls,
     # "dgls": solve_poisson_dgls,
-    "sdhm": solve_poisson_sdhm,
+    # "sdhm": solve_poisson_sdhm,
     # "ls": solve_poisson_ls,
     # "dls": solve_poisson_dls,
-    # "lsh": solve_poisson_lsh,
-    # "vms": solve_poisson_vms,
+    # "lsh": solve_poisson_lsh,  # this method implementation should be reviewed (regarding BC handling)
+    "vms": solve_poisson_vms,
     # "dvms": solve_poisson_dvms,
-    # "mixed_RT": solve_poisson_mixed_RT,
+    "mixed_RT": solve_poisson_mixed_RT,
 }
 
 degree = 1
