@@ -5,6 +5,7 @@ import numpy as np
 from logging import warning
 import matplotlib.pyplot as plt
 import matplotlib
+from pyop2.exceptions import ArityTypeError
 from scipy.sparse.linalg import svds, eigs, ArpackNoConvergence
 from scipy.sparse import csr_matrix
 from slepc4py import SLEPc
@@ -157,6 +158,72 @@ def plot_matrix_hybrid_multiplier(a_form, bcs=[], **kwargs):
     ax.set_yticklabels([])
 
     return plot
+
+
+def filter_real_part_in_array(array: np.ndarray, imag_threshold: float = 1e-5) -> np.ndarray:
+    """Utility function to filter real part in a numpy array.
+
+    :param array: 
+        Array with real and complex numbers.
+
+    :param imag_threshold:
+        Threshold to cut off imaginary part in complex number.
+
+    :return:
+        Filtered array with only real numbers.
+    """
+    real_part_array = array.real[abs(array.imag) < 1e-5]
+    return real_part_array
+
+
+def calculate_condition_number(A, num_of_factors, method: str = "scipy"):
+    method = method.lower()
+
+    if method == "scipy":
+        size = A.getSize()
+        Mnp = csr_matrix(A.getValuesCSR()[::-1], shape=size)
+        Mnp.eliminate_zeros()
+
+        largest_eigenvalues = eigs(Mnp, k=num_of_factors, which="LM", return_eigenvectors=False)
+        real_largest_eigenvalues = largest_eigenvalues.real[abs(largest_eigenvalues.imag) < 1e-5]
+
+        smallest_eigenvalues = eigs(Mnp, k=num_of_factors, which="SM", return_eigenvectors=False)
+        real_smallest_eigenvalues = smallest_eigenvalues.real[abs(smallest_eigenvalues.imag) < 1e-5]
+
+        zero_tol = 1e-10
+        smallest_eigenvalues = real_smallest_eigenvalues[real_smallest_eigenvalues > zero_tol]
+        largest_eigenvalues = real_largest_eigenvalues[real_largest_eigenvalues > zero_tol]
+        condition_number = largest_eigenvalues.max() / smallest_eigenvalues.min()
+    elif method == "slepc":
+        S = SLEPc.SVD()
+        S.create()
+        S.setOperator(A)
+        S.setType(SLEPc.SVD.Type.LAPACK)
+        S.setWhichSingularTriplets(which=S.Which.LARGEST)
+        S.setDimensions(A.size[0])
+        S.solve()
+
+        # Recovering the solution
+        nconv = int(S.getConverged())
+        smallest_singular_values_list = list()
+        largest_singular_values_list = list()
+        num_of_values_in_list = num_of_factors
+        num_of_extreme_singular_values = num_of_values_in_list if num_of_values_in_list < nconv else nconv
+        if nconv > 0:
+            for idx in range(num_of_extreme_singular_values):
+                smallest_singular_values_list.append(S.getValue(idx))
+                largest_singular_values_list.append(S.getValue(nconv - 1 - idx))
+
+        singular_values_list = smallest_singular_values_list + largest_singular_values_list
+
+        singular_values = np.array(singular_values_list)
+        zero_tol = 1e-8
+        singular_values = singular_values[singular_values > zero_tol]
+        condition_number = singular_values.max() / singular_values.min()
+    else:
+        raise NotImplementedError("The required method for condition number estimation is currently unavailable.")
+
+    return condition_number
 
 
 def solve_poisson_cg(num_elements_x, num_elements_y, degree=1, use_quads=False):
@@ -986,7 +1053,7 @@ def solve_poisson_sdhm(num_elements_x, num_elements_y, degree=1, use_quads=False
     bcs = DirichletBC(W.sub(2), p_exact, "on_boundary")
 
     # Hybridization parameter
-    beta_0 = Constant(1.0-18)
+    beta_0 = Constant(1.0e0)
     beta = beta_0 / h
     beta_avg = beta_0 / h("+")
 
@@ -1016,24 +1083,9 @@ def solve_poisson_sdhm(num_elements_x, num_elements_y, degree=1, use_quads=False
     nnz = Mnp.nnz
     number_of_dofs = Mnp.shape[0]
 
-    num_of_factors_svd = int(0.5 * number_of_dofs)
+    num_of_factors = int(0.95 * number_of_dofs) - 1
     try:
-        # _, largest_singular_values, _ = svds(Mnp, k=num_of_factors_svd, which="LM", solver="arpack")
-        # _, smallest_singular_values, _ = svds(Mnp, k=num_of_factors_svd, which="SM", solver="arpack")
-        largest_eigenvalues = eigs(Mnp, k=num_of_factors_svd, which="LM", return_eigenvectors=False)
-        real_largest_eigenvalues = largest_eigenvalues.real[abs(largest_eigenvalues.imag) < 1e-3]
-        print(real_largest_eigenvalues)
-        smallest_eigenvalues = eigs(Mnp, k=num_of_factors_svd, which="SM", return_eigenvectors=False)
-        real_smallest_eigenvalues = smallest_eigenvalues.real[abs(smallest_eigenvalues.imag) < 1e-3]
-        print(real_smallest_eigenvalues)
-        # eigs
-        zero_tol = 1e-10
-        # smallest_singular_values = smallest_singular_values[smallest_singular_values > zero_tol]
-        # largest_singular_values = largest_singular_values[largest_singular_values > zero_tol]
-        # condition_number = largest_singular_values.max() / smallest_singular_values.min()
-        smallest_eigenvalues = real_smallest_eigenvalues[real_smallest_eigenvalues > zero_tol]
-        largest_eigenvalues = real_largest_eigenvalues[real_largest_eigenvalues > zero_tol]
-        condition_number = largest_eigenvalues.max() / smallest_eigenvalues.min()
+        condition_number = calculate_condition_number(petsc_mat, num_of_factors, method="SciPy")
     except ArpackNoConvergence:
         warning("SciPy Arpack svds solver has not converged. Using SLEPc to calculate cond. number instead.")
         S = SLEPc.SVD()
@@ -1048,7 +1100,7 @@ def solve_poisson_sdhm(num_elements_x, num_elements_y, degree=1, use_quads=False
         nconv = int(S.getConverged())
         smallest_singular_values_list = list()
         largest_singular_values_list = list()
-        num_of_values_in_list = num_of_factors_svd
+        num_of_values_in_list = num_of_factors
         num_of_extreme_singular_values = num_of_values_in_list if num_of_values_in_list < nconv else nconv
         if nconv > 0:
             for idx in range(num_of_extreme_singular_values):
