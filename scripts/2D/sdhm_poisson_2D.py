@@ -60,10 +60,9 @@ p_boundaries = Constant(0.0)
 u_projected = sigma_e
 
 # Hybridization parameter
-beta_0 = Constant(1.0e-18)
+beta_0 = Constant(1.0e0)
 # beta = beta_0 / h
 beta = beta_0
-beta_avg = beta_0 / h("+")
 
 # Mixed classical terms
 a = (dot(u, v) - div(v) * p - q * div(u)) * dx
@@ -75,7 +74,7 @@ a += 0.5 * inner(curl(u), curl(v)) * dx
 L += 0.5 * f * div(v) * dx
 # Hybridization terms
 a += lambda_h("+") * dot(v, n)("+") * dS + mu_h("+") * dot(u, n)("+") * dS
-a += beta_avg * (lambda_h("+") - p("+")) * (mu_h("+") - q("+")) * dS
+a += beta("+") * (lambda_h("+") - p("+")) * (mu_h("+") - q("+")) * dS
 # Weakly imposed BC
 a += (p_boundaries * dot(v, n) + mu_h * (dot(u, n) - dot(u_projected, n))) * ds
 a += beta * (lambda_h - p_boundaries) * mu_h * ds

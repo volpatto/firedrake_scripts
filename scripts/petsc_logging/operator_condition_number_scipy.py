@@ -205,7 +205,8 @@ def calculate_condition_number(
         else:
             S.setProblemType(SLEPc.EPS.ProblemType.NHEP)
         S.setDimensions(nev=num_of_factors, mpd=num_of_factors)
-        S.setTolerances(max_it=1000)
+        # S.setKrylovSchurDetectZeros(detect=True)
+        S.setTolerances(max_it=2000)
         S.setWhichEigenpairs(SLEPc.EPS.Which.LARGEST_REAL)
         S.solve()
 
@@ -794,32 +795,40 @@ def solve_poisson_sdhm(num_elements_x, num_elements_y, degree=1, use_quads=False
     sigma_e = Function(U, name='Exact velocity')
     sigma_e.project(-grad(p_exact))
 
+    # Forcing function
+    f_expression = div(-grad(p_exact))
+    f = Function(V).interpolate(f_expression)
+
     # BCs
     u_projected = sigma_e
-    bcs = DirichletBC(W.sub(2), p_exact, "on_boundary")
+    p_boundaries = p_exact
 
     # Hybridization parameter
     beta_0 = Constant(1.0e0)
     beta = beta_0 / h
-    beta_avg = beta_0 / h("+")
 
     # Mixed classical terms
     a = (dot(u, v) - div(v) * p - q * div(u)) * dx
+    L = -f * q * dx
     # Stabilizing terms
     a += -0.5 * inner(u + grad(p), v + grad(q)) * dx
     a += 0.5 * div(u) * div(v) * dx
     a += 0.5 * inner(curl(u), curl(v)) * dx
+    L += 0.5 * f * div(v) * dx
     # Hybridization terms
     a += lambda_h("+") * dot(v, n)("+") * dS + mu_h("+") * dot(u, n)("+") * dS
-    a += beta_avg * (lambda_h("+") - p("+")) * (mu_h("+") - q("+")) * dS
-    # # Weakly imposed BC
-    a += mu_h * dot(u, n) * ds
-    a += beta * lambda_h * mu_h * ds
+    a += beta("+") * (lambda_h("+") - p("+")) * (mu_h("+") - q("+")) * dS
+    # Weakly imposed BC
+    a += (p_boundaries * dot(v, n) + mu_h * (dot(u, n) - dot(u_projected, n))) * ds
+    a += beta * (lambda_h - p_boundaries) * mu_h * ds
 
-    _A = Tensor(a)
+    F = a - L
+    a_form = lhs(F)
+
+    _A = Tensor(a_form)
     A = _A.blocks
     S = A[2, 2] - A[2, :2] * A[:2, :2].inv * A[:2, 2]
-    Smat = assemble(S, bcs=bcs)
+    Smat = assemble(S)
     petsc_mat = Smat.M.handle
 
     is_symmetric = petsc_mat.isSymmetric(tol=1e-8)
@@ -829,7 +838,7 @@ def solve_poisson_sdhm(num_elements_x, num_elements_y, degree=1, use_quads=False
     nnz = Mnp.nnz
     number_of_dofs = Mnp.shape[0]
 
-    num_of_factors = int(0.95 * number_of_dofs) - 1
+    num_of_factors = int(0.99 * number_of_dofs) - 1
     condition_number = calculate_condition_number(petsc_mat, num_of_factors, backend="slepc")
 
     result = ConditionNumberResult(
@@ -1002,13 +1011,13 @@ solvers_options = {
     # "cg": solve_poisson_cg,
     # "cgls": solve_poisson_cgls,
     # "dgls": solve_poisson_dgls,
-    # "sdhm": solve_poisson_sdhm,
+    "sdhm": solve_poisson_sdhm,
     # "ls": solve_poisson_ls,
     # "dls": solve_poisson_dls,
     # "lsh": solve_poisson_lsh,  # this method implementation should be reviewed (regarding BC handling)
-    "vms": solve_poisson_vms,
+    # "vms": solve_poisson_vms,
     # "dvms": solve_poisson_dvms,
-    "mixed_RT": solve_poisson_mixed_RT,
+    # "mixed_RT": solve_poisson_mixed_RT,
 }
 
 degree = 1
