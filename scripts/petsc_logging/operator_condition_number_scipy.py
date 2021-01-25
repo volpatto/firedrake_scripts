@@ -85,7 +85,41 @@ def plot_matrix_mixed(assembled_form, **kwargs):
     return plot
 
 
-def plot_matrix_hybrid_full(a_form, bcs=[], **kwargs):
+def plot_matrix_primal_hybrid_full(a_form, bcs=[], **kwargs):
+    """Provides a plot of a full hybrid-mixed matrix."""
+    fig, ax = plt.subplots(1, 1)
+
+    assembled_form = assemble(a_form, bcs=bcs, mat_type="aij")
+    petsc_mat = assembled_form.M.handle
+
+    f0_size = assembled_form.M[0, 0].handle.getSize()
+
+    size = petsc_mat.getSize()
+    Mnp = csr_matrix(petsc_mat.getValuesCSR()[::-1], shape=size)
+    Mnp.eliminate_zeros()
+    Mnp = Mnp.toarray()
+
+    # Eliminate rows and columns filled with zero entries
+    Mnp = Mnp[~(Mnp==0).all(1)]
+    idx = np.argwhere(np.all(Mnp[..., :] == 0, axis=0))
+    Mnp = np.delete(Mnp, idx, axis=1)
+    Am = np.ma.masked_values(Mnp, 0, rtol=1e-13)
+
+    # Plot the matrix
+    plot = ax.matshow(Am, **kwargs)
+
+    # Remove axis ticks and values
+    ax.tick_params(length=0)
+    ax.set_xticklabels([])
+    ax.set_yticklabels([])
+
+    ax.axhline(y=f0_size[0] - 0.5, color="k")
+    ax.axvline(x=f0_size[0] - 0.5, color="k")
+
+    return plot
+
+
+def plot_matrix_mixed_hybrid_full(a_form, bcs=[], **kwargs):
     """Provides a plot of a full hybrid-mixed matrix."""
     fig, ax = plt.subplots(1, 1)
 
@@ -122,13 +156,14 @@ def plot_matrix_hybrid_full(a_form, bcs=[], **kwargs):
     return plot
 
 
-def plot_matrix_hybrid_multiplier(a_form, bcs=[], **kwargs):
+def plot_matrix_hybrid_multiplier(a_form, trace_index=2, bcs=[], **kwargs):
     """Provides a plot of a condensed hybrid-mixed matrix for single scale problems."""
     fig, ax = plt.subplots(1, 1)
 
     _A = Tensor(a_form)
     A = _A.blocks
-    S = A[2, 2] - A[2, :2] * A[:2, :2].inv * A[:2, 2]
+    idx = trace_index
+    S = A[idx, idx] - A[idx, :idx] * A[:idx, :idx].inv * A[:idx, idx]
     Smat = assemble(S, bcs=bcs)
 
     petsc_mat = Smat.M.handle
@@ -948,6 +983,89 @@ def solve_poisson_hdg(num_elements_x, num_elements_y, degree=1, use_quads=False)
     return result
 
 
+def solve_poisson_cgh(num_elements_x, num_elements_y, degree=1, use_quads=False):
+    # Defining the mesh
+    mesh = UnitSquareMesh(num_elements_x, num_elements_y, quadrilateral=use_quads)
+
+    # Function space declaration
+    pressure_family = 'DQ' if use_quads else 'DG'
+    trace_family = "HDiv Trace"
+    V = FunctionSpace(mesh, pressure_family, degree)
+    T = FunctionSpace(mesh, trace_family, degree)
+    W = V * T
+
+    # Trial and test functions
+    # solution = Function(W)
+    # u, p, lambda_h = split(solution)
+    p, lambda_h = TrialFunctions(W)
+    q, mu_h  = TestFunctions(W)
+
+    # Mesh entities
+    n = FacetNormal(mesh)
+    h = CellDiameter(mesh)
+    x, y = SpatialCoordinate(mesh)
+
+    # Exact solution
+    p_exact = sin(2 * pi * x) * sin(2 * pi * y)
+    exact_solution = Function(V).interpolate(p_exact)
+    exact_solution.rename("Exact pressure", "label")
+
+    # Forcing function
+    f_expression = div(-grad(p_exact))
+    f = Function(V).interpolate(f_expression)
+
+    # Dirichlet BCs
+    bc_multiplier = DirichletBC(W.sub(1), p_exact, "on_boundary")
+
+    # Hybridization parameter
+    beta_0 = Constant(1.0e0)
+    beta = beta_0 / h
+    # beta = beta_0
+
+    # Numerical flux trace
+    u = -grad(p)
+    u_hat = u + beta * (p - lambda_h) * n
+
+    # HDG classical form
+    a = -dot(u, grad(q)) * dx + jump(u_hat, n) * q("+") * dS
+    L = f * q * dx
+    # Transmission condition
+    a += jump(u_hat, n) * mu_h("+") * dS
+    # Weakly imposed BC
+    a += dot(u_hat, n) * q * ds
+
+    F = a - L
+    a_form = lhs(F)
+
+    _A = Tensor(a_form)
+    A = _A.blocks
+    S = A[1, 1] - A[1, :1] * A[:1, :1].inv * A[:1, 1]
+    Smat = assemble(S, bcs=bc_multiplier)
+    petsc_mat = Smat.M.handle
+
+    is_symmetric = petsc_mat.isSymmetric(tol=1e-8)
+    size = petsc_mat.getSize()
+    Mnp = csr_matrix(petsc_mat.getValuesCSR()[::-1], shape=size)
+    Mnp.eliminate_zeros()
+    nnz = Mnp.nnz
+    number_of_dofs = Mnp.shape[0]
+
+    num_of_factors = int(0.99 * number_of_dofs) - 1
+    condition_number = calculate_condition_number(petsc_mat, num_of_factors, backend="slepc", is_negative_spectrum=True)
+
+    result = ConditionNumberResult(
+        form=a,
+        assembled_form=Smat,
+        condition_number=condition_number,
+        sparse_operator=Mnp,
+        number_of_dofs=number_of_dofs,
+        nnz=nnz,
+        is_operator_symmetric=is_symmetric,
+        bcs=bc_multiplier
+    )
+    return result
+
+
 def solve_poisson_lsh(num_elements_x, num_elements_y, degree=1, use_quads=False):
     # Defining the mesh
     mesh = UnitSquareMesh(num_elements_x, num_elements_y, quadrilateral=use_quads)
@@ -1112,29 +1230,30 @@ solvers_options = {
     # "vms": solve_poisson_vms,
     # "dvms": solve_poisson_dvms,
     # "mixed_RT": solve_poisson_mixed_RT,
-    "hdg": solve_poisson_hdg,
+    # "hdg": solve_poisson_hdg,
+    "cgh": solve_poisson_cgh,
 }
 
 degree = 1
 last_degree = 1
-for current_solver in solvers_options:
+# for current_solver in solvers_options:
 
-    # Setting the output file name
-    name = f"{current_solver}"
+#     # Setting the output file name
+#     name = f"{current_solver}"
 
-    # Selecting the solver and its kwargs
-    solver = solvers_options[current_solver]
+#     # Selecting the solver and its kwargs
+#     solver = solvers_options[current_solver]
 
-    # Performing the convergence study
-    hp_refinement_cond_number_calculation(
-        solver,
-        min_degree=degree,
-        max_degree=degree + last_degree,
-        name=name
-    )
+#     # Performing the convergence study
+#     hp_refinement_cond_number_calculation(
+#         solver,
+#         min_degree=degree,
+#         max_degree=degree + last_degree,
+#         name=name
+#     )
 
 N = 5
-result = solve_poisson_hdg(N, N, degree=1, use_quads=True)
+result = solve_poisson_cgh(N, N, degree=1, use_quads=True)
 
 print(f'Is symmetric? {result.is_operator_symmetric}')
 print(f'nnz: {result.nnz}')
@@ -1142,13 +1261,13 @@ print(f'DoFs: {result.number_of_dofs}')
 print(f'Condition Number: {result.condition_number}')
 
 # Plotting the resulting matrix
-# import copy
-# my_cmap = copy.copy(plt.cm.get_cmap("winter"))
-# my_cmap.set_bad(color="lightgray")
-# # plot_matrix_hybrid_full(result.form, result.bcs, cmap=my_cmap)
-# plot_matrix_hybrid_multiplier(result.form, result.bcs, cmap=my_cmap)
-# # plot_matrix(result.assembled_form, cmap=my_cmap)
-# # plot_matrix_mixed(result.assembled_form, cmap=my_cmap)
-# plt.tight_layout()
-# plt.savefig("sparse_pattern.png")
-# plt.show()
+import copy
+my_cmap = copy.copy(plt.cm.get_cmap("winter"))
+my_cmap.set_bad(color="lightgray")
+# plot_matrix_primal_hybrid_full(result.form, result.bcs, cmap=my_cmap)
+plot_matrix_hybrid_multiplier(result.form, trace_index=1, bcs=result.bcs, cmap=my_cmap)
+# plot_matrix(result.assembled_form, cmap=my_cmap)
+# plot_matrix_mixed(result.assembled_form, cmap=my_cmap)
+plt.tight_layout()
+plt.savefig("sparse_pattern.png")
+plt.show()
