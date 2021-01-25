@@ -1073,7 +1073,6 @@ def solve_poisson_ldgc(num_elements_x, num_elements_y, degree=1, use_quads=False
     # Function space declaration
     primal_family = "DQ" if use_quads else "DG"
     V = FunctionSpace(mesh, primal_family, degree)
-    U = VectorFunctionSpace(mesh, "CG", degree)
     LagrangeElement = FiniteElement("Lagrange", mesh.ufl_cell(), degree)
     C0TraceElement = LagrangeElement["facet"]
     T = FunctionSpace(mesh, C0TraceElement)
