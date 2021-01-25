@@ -55,7 +55,7 @@ f = Function(V).interpolate(f_expression)
 bc_multiplier = DirichletBC(W.sub(1), p_exact, "on_boundary")
 
 # Hybridization parameter
-beta_0 = Constant(-1.0e0)
+beta_0 = Constant(1.0e0)
 beta = beta_0 / h
 # beta = beta_0
 
