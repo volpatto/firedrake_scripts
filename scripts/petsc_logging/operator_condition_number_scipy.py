@@ -1066,6 +1066,93 @@ def solve_poisson_cgh(num_elements_x, num_elements_y, degree=1, use_quads=False)
     return result
 
 
+def solve_poisson_ldgc(num_elements_x, num_elements_y, degree=1, use_quads=False):
+    # Defining the mesh
+    mesh = UnitSquareMesh(num_elements_x, num_elements_y, quadrilateral=use_quads)
+
+    # Function space declaration
+    primal_family = "DQ" if use_quads else "DG"
+    V = FunctionSpace(mesh, primal_family, degree)
+    U = VectorFunctionSpace(mesh, "CG", degree)
+    LagrangeElement = FiniteElement("Lagrange", mesh.ufl_cell(), degree)
+    C0TraceElement = LagrangeElement["facet"]
+    T = FunctionSpace(mesh, C0TraceElement)
+    W = V * T
+
+    # Trial and test functions
+    # solution = Function(W)
+    # u, p, lambda_h = split(solution)
+    p, lambda_h = TrialFunctions(W)
+    q, mu_h  = TestFunctions(W)
+
+    # Mesh entities
+    n = FacetNormal(mesh)
+    h = CellDiameter(mesh)
+    x, y = SpatialCoordinate(mesh)
+
+    # Exact solution
+    p_exact = sin(2 * pi * x) * sin(2 * pi * y)
+    exact_solution = Function(V).interpolate(p_exact)
+    exact_solution.rename("Exact pressure", "label")
+
+    # Forcing function
+    f_expression = div(-grad(p_exact))
+    f = Function(V).interpolate(f_expression)
+
+    # Dirichlet BCs
+    p_boundaries = Constant(0.0)
+    bc_multiplier = DirichletBC(W.sub(1), p_exact, "on_boundary")
+
+    # Hybridization parameter
+    s = Constant(1.0)
+    beta = Constant(32.0)
+    h = CellDiameter(mesh)
+    h_avg = avg(h)
+
+    # Classical term
+    a = dot(grad(p), grad(q)) * dx
+    L = f * q * dx
+    # Hybridization terms
+    a += s * dot(grad(q), n)("+") * (p("+") - lambda_h("+")) * dS
+    a += -dot(grad(p), n)("+") * (q("+") - mu_h("+")) * dS
+    a += (beta / h_avg) * (p("+") - lambda_h("+")) * (q("+") - mu_h("+")) * dS
+    # Boundary terms
+    # a += -dot(vel_projected, n) * v * ds  # How to set this bc??
+    # a += (beta / h) * (p- p_boundaries) * q * ds  # is this necessary?
+    L += s * dot(grad(q), n) * p_boundaries * ds
+
+    F = a - L
+    a_form = lhs(F)
+
+    _A = Tensor(a_form)
+    A = _A.blocks
+    S = A[1, 1] - A[1, :1] * A[:1, :1].inv * A[:1, 1]
+    Smat = assemble(S, bcs=bc_multiplier)
+    petsc_mat = Smat.M.handle
+
+    is_symmetric = petsc_mat.isSymmetric(tol=1e-8)
+    size = petsc_mat.getSize()
+    Mnp = csr_matrix(petsc_mat.getValuesCSR()[::-1], shape=size)
+    Mnp.eliminate_zeros()
+    nnz = Mnp.nnz
+    number_of_dofs = Mnp.shape[0]
+
+    num_of_factors = int(0.99 * number_of_dofs) - 1
+    condition_number = calculate_condition_number(petsc_mat, num_of_factors, backend="slepc", is_negative_spectrum=False)
+
+    result = ConditionNumberResult(
+        form=a,
+        assembled_form=Smat,
+        condition_number=condition_number,
+        sparse_operator=Mnp,
+        number_of_dofs=number_of_dofs,
+        nnz=nnz,
+        is_operator_symmetric=is_symmetric,
+        bcs=bc_multiplier
+    )
+    return result
+
+
 def solve_poisson_lsh(num_elements_x, num_elements_y, degree=1, use_quads=False):
     # Defining the mesh
     mesh = UnitSquareMesh(num_elements_x, num_elements_y, quadrilateral=use_quads)
@@ -1231,43 +1318,44 @@ solvers_options = {
     # "dvms": solve_poisson_dvms,
     # "mixed_RT": solve_poisson_mixed_RT,
     # "hdg": solve_poisson_hdg,
-    "cgh": solve_poisson_cgh,
+    # "cgh": solve_poisson_cgh,
+    "ldgc": solve_poisson_ldgc,
 }
 
 degree = 1
 last_degree = 1
-# for current_solver in solvers_options:
+for current_solver in solvers_options:
 
-#     # Setting the output file name
-#     name = f"{current_solver}"
+    # Setting the output file name
+    name = f"{current_solver}"
 
-#     # Selecting the solver and its kwargs
-#     solver = solvers_options[current_solver]
+    # Selecting the solver and its kwargs
+    solver = solvers_options[current_solver]
 
-#     # Performing the convergence study
-#     hp_refinement_cond_number_calculation(
-#         solver,
-#         min_degree=degree,
-#         max_degree=degree + last_degree,
-#         name=name
-#     )
+    # Performing the convergence study
+    hp_refinement_cond_number_calculation(
+        solver,
+        min_degree=degree,
+        max_degree=degree + last_degree,
+        name=name
+    )
 
-N = 5
-result = solve_poisson_cgh(N, N, degree=1, use_quads=True)
+# N = 5
+# result = solve_poisson_ldgc(N, N, degree=1, use_quads=True)
 
-print(f'Is symmetric? {result.is_operator_symmetric}')
-print(f'nnz: {result.nnz}')
-print(f'DoFs: {result.number_of_dofs}')
-print(f'Condition Number: {result.condition_number}')
+# print(f'Is symmetric? {result.is_operator_symmetric}')
+# print(f'nnz: {result.nnz}')
+# print(f'DoFs: {result.number_of_dofs}')
+# print(f'Condition Number: {result.condition_number}')
 
-# Plotting the resulting matrix
-import copy
-my_cmap = copy.copy(plt.cm.get_cmap("winter"))
-my_cmap.set_bad(color="lightgray")
+# # Plotting the resulting matrix
+# import copy
+# my_cmap = copy.copy(plt.cm.get_cmap("winter"))
+# my_cmap.set_bad(color="lightgray")
 # plot_matrix_primal_hybrid_full(result.form, result.bcs, cmap=my_cmap)
-plot_matrix_hybrid_multiplier(result.form, trace_index=1, bcs=result.bcs, cmap=my_cmap)
-# plot_matrix(result.assembled_form, cmap=my_cmap)
-# plot_matrix_mixed(result.assembled_form, cmap=my_cmap)
-plt.tight_layout()
-plt.savefig("sparse_pattern.png")
-plt.show()
+# # plot_matrix_hybrid_multiplier(result.form, trace_index=1, bcs=result.bcs, cmap=my_cmap)
+# # plot_matrix(result.assembled_form, cmap=my_cmap)
+# # plot_matrix_mixed(result.assembled_form, cmap=my_cmap)
+# plt.tight_layout()
+# plt.savefig("sparse_pattern.png")
+# plt.show()
