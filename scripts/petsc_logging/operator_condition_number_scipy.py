@@ -803,7 +803,13 @@ def solve_poisson_dls(num_elements_x, num_elements_y, degree=1, use_quads=False)
     return result
 
 
-def solve_poisson_sdhm(num_elements_x, num_elements_y, degree=1, use_quads=False):
+def solve_poisson_sdhm(
+    num_elements_x, 
+    num_elements_y, 
+    degree=1, 
+    use_quads=False,
+    is_multiplier_continuous=True
+):
     # Defining the mesh
     mesh = UnitSquareMesh(num_elements_x, num_elements_y, quadrilateral=use_quads)
 
@@ -813,7 +819,12 @@ def solve_poisson_sdhm(num_elements_x, num_elements_y, degree=1, use_quads=False
     trace_family = "HDiv Trace"
     U = VectorFunctionSpace(mesh, velocity_family, degree)
     V = FunctionSpace(mesh, pressure_family, degree)
-    T = FunctionSpace(mesh, trace_family, degree)
+    if is_multiplier_continuous:
+        LagrangeElement = FiniteElement("Lagrange", mesh.ufl_cell(), degree)
+        C0TraceElement = LagrangeElement["facet"]
+        T = FunctionSpace(mesh, C0TraceElement)
+    else:
+        T = FunctionSpace(mesh, trace_family, degree)
     W = U * V * T
 
     # Trial and test functions
@@ -895,7 +906,13 @@ def solve_poisson_sdhm(num_elements_x, num_elements_y, degree=1, use_quads=False
     return result
 
 
-def solve_poisson_hdg(num_elements_x, num_elements_y, degree=1, use_quads=False):
+def solve_poisson_hdg(
+    num_elements_x, 
+    num_elements_y, 
+    degree=1, 
+    use_quads=False,
+    is_multiplier_continuous=True
+):
     # Defining the mesh
     mesh = UnitSquareMesh(num_elements_x, num_elements_y, quadrilateral=use_quads)
 
@@ -905,7 +922,12 @@ def solve_poisson_hdg(num_elements_x, num_elements_y, degree=1, use_quads=False)
     trace_family = "HDiv Trace"
     U = VectorFunctionSpace(mesh, velocity_family, degree)
     V = FunctionSpace(mesh, pressure_family, degree)
-    T = FunctionSpace(mesh, trace_family, degree)
+    if is_multiplier_continuous:
+        LagrangeElement = FiniteElement("Lagrange", mesh.ufl_cell(), degree)
+        C0TraceElement = LagrangeElement["facet"]
+        T = FunctionSpace(mesh, C0TraceElement)
+    else:
+        T = FunctionSpace(mesh, trace_family, degree)
     W = U * V * T
 
     # Trial and test functions
@@ -983,7 +1005,13 @@ def solve_poisson_hdg(num_elements_x, num_elements_y, degree=1, use_quads=False)
     return result
 
 
-def solve_poisson_cgh(num_elements_x, num_elements_y, degree=1, use_quads=False):
+def solve_poisson_cgh(
+    num_elements_x, 
+    num_elements_y, 
+    degree=1, 
+    use_quads=False,
+    is_multiplier_continuous=True
+):
     # Defining the mesh
     mesh = UnitSquareMesh(num_elements_x, num_elements_y, quadrilateral=use_quads)
 
@@ -991,7 +1019,12 @@ def solve_poisson_cgh(num_elements_x, num_elements_y, degree=1, use_quads=False)
     pressure_family = 'DQ' if use_quads else 'DG'
     trace_family = "HDiv Trace"
     V = FunctionSpace(mesh, pressure_family, degree)
-    T = FunctionSpace(mesh, trace_family, degree)
+    if is_multiplier_continuous:
+        LagrangeElement = FiniteElement("Lagrange", mesh.ufl_cell(), degree)
+        C0TraceElement = LagrangeElement["facet"]
+        T = FunctionSpace(mesh, C0TraceElement)
+    else:
+        T = FunctionSpace(mesh, trace_family, degree)
     W = V * T
 
     # Trial and test functions
@@ -1066,16 +1099,26 @@ def solve_poisson_cgh(num_elements_x, num_elements_y, degree=1, use_quads=False)
     return result
 
 
-def solve_poisson_ldgc(num_elements_x, num_elements_y, degree=1, use_quads=False):
+def solve_poisson_ldgc(
+    num_elements_x, 
+    num_elements_y, 
+    degree=1, 
+    use_quads=False,
+    is_multiplier_continuous=True
+):
     # Defining the mesh
     mesh = UnitSquareMesh(num_elements_x, num_elements_y, quadrilateral=use_quads)
 
     # Function space declaration
     primal_family = "DQ" if use_quads else "DG"
     V = FunctionSpace(mesh, primal_family, degree)
-    LagrangeElement = FiniteElement("Lagrange", mesh.ufl_cell(), degree)
-    C0TraceElement = LagrangeElement["facet"]
-    T = FunctionSpace(mesh, C0TraceElement)
+    if is_multiplier_continuous:
+        LagrangeElement = FiniteElement("Lagrange", mesh.ufl_cell(), degree)
+        C0TraceElement = LagrangeElement["facet"]
+        T = FunctionSpace(mesh, C0TraceElement)
+    else:
+        trace_family = "HDiv Trace"
+        T = FunctionSpace(mesh, trace_family, degree)
     W = V * T
 
     # Trial and test functions
@@ -1103,7 +1146,7 @@ def solve_poisson_ldgc(num_elements_x, num_elements_y, degree=1, use_quads=False
     bc_multiplier = DirichletBC(W.sub(1), p_exact, "on_boundary")
 
     # Hybridization parameter
-    s = Constant(1.0)
+    s = Constant(-1.0)
     beta = Constant(32.0)
     h = CellDiameter(mesh)
     h_avg = avg(h)
@@ -1152,17 +1195,28 @@ def solve_poisson_ldgc(num_elements_x, num_elements_y, degree=1, use_quads=False
     return result
 
 
-def solve_poisson_lsh(num_elements_x, num_elements_y, degree=1, use_quads=False):
+def solve_poisson_lsh(
+    num_elements_x, 
+    num_elements_y, 
+    degree=1, 
+    use_quads=False,
+    is_multiplier_continuous=False
+):
     # Defining the mesh
     mesh = UnitSquareMesh(num_elements_x, num_elements_y, quadrilateral=use_quads)
 
     # Function space declaration
     pressure_family = 'DQ' if use_quads else 'DG'
     velocity_family = 'DQ' if use_quads else 'DG'
-    trace_family = "HDiv Trace"
     U = VectorFunctionSpace(mesh, velocity_family, degree)
     V = FunctionSpace(mesh, pressure_family, degree)
-    T = FunctionSpace(mesh, trace_family, degree)
+    if is_multiplier_continuous:
+        LagrangeElement = FiniteElement("Lagrange", mesh.ufl_cell(), degree)
+        C0TraceElement = LagrangeElement["facet"]
+        T = FunctionSpace(mesh, C0TraceElement)
+    else:
+        trace_family = "HDiv Trace"
+        T = FunctionSpace(mesh, trace_family, degree)
     W = U * V * T
 
     # Trial and test functions
@@ -1195,8 +1249,6 @@ def solve_poisson_lsh(num_elements_x, num_elements_y, degree=1, use_quads=False)
     delta_1 = Constant(1)
     delta_2 = Constant(1)
     delta_3 = Constant(1)
-    stabilizing_mass_constant = Constant(0)
-    ls_lambda_constant = Constant(0)
 
     # Numerical flux trace
     u_hat = u + beta * (p - lambda_h) * n
@@ -1228,7 +1280,7 @@ def solve_poisson_lsh(num_elements_x, num_elements_y, degree=1, use_quads=False)
 
     # Weakly imposed BC from hybridization
     # a += mu_h * (lambda_h - p_boundaries) * ds
-    a += mu_h * lambda_h * ds
+    # a += mu_h * lambda_h * ds
     # ###
     # a += (
     #     (mu_h - q) * (lambda_h - p_boundaries) * ds
@@ -1247,8 +1299,8 @@ def solve_poisson_lsh(num_elements_x, num_elements_y, degree=1, use_quads=False)
     nnz = Mnp.nnz
     number_of_dofs = Mnp.shape[0]
 
-    num_of_factors = int(0.98 * number_of_dofs) - 1
-    condition_number = calculate_condition_number(petsc_mat, num_of_factors, backend="slepc")
+    num_of_factors = int(0.99 * number_of_dofs) - 1
+    condition_number = calculate_condition_number(petsc_mat, num_of_factors, backend="slepc", is_negative_spectrum=True)
 
     result = ConditionNumberResult(
         form=a,
@@ -1336,6 +1388,7 @@ for current_solver in solvers_options:
         solver,
         min_degree=degree,
         max_degree=degree + last_degree,
+        quadrilateral=True,
         name=name
     )
 
@@ -1351,8 +1404,9 @@ for current_solver in solvers_options:
 # import copy
 # my_cmap = copy.copy(plt.cm.get_cmap("winter"))
 # my_cmap.set_bad(color="lightgray")
-# plot_matrix_primal_hybrid_full(result.form, result.bcs, cmap=my_cmap)
-# # plot_matrix_hybrid_multiplier(result.form, trace_index=1, bcs=result.bcs, cmap=my_cmap)
+# # plot_matrix_primal_hybrid_full(result.form, result.bcs, cmap=my_cmap)
+# # plot_matrix_mixed_hybrid_full(result.form, result.bcs, cmap=my_cmap)
+# plot_matrix_hybrid_multiplier(result.form, trace_index=1, bcs=result.bcs, cmap=my_cmap)
 # # plot_matrix(result.assembled_form, cmap=my_cmap)
 # # plot_matrix_mixed(result.assembled_form, cmap=my_cmap)
 # plt.tight_layout()

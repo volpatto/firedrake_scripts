@@ -26,7 +26,10 @@ trace_family = "DGT"
 degree = 1
 U = VectorFunctionSpace(mesh, velocity_family, degree)
 V = FunctionSpace(mesh, pressure_family, degree)
-T = FunctionSpace(mesh, trace_family, degree)
+LagrangeElement = FiniteElement("Lagrange", mesh.ufl_cell(), degree)
+C0TraceElement = LagrangeElement["facet"]
+T = FunctionSpace(mesh, C0TraceElement)
+# T = FunctionSpace(mesh, trace_family, degree)
 W = U * V * T
 
 # Trial and test functions

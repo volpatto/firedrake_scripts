@@ -20,13 +20,19 @@ mesh = UnitSquareMesh(N, N, quadrilateral=use_quads)
 comm = mesh.comm
 
 # Function space declaration
+is_multiplier_continuous = True
 pressure_family = 'DQ' if use_quads else 'DG'
 velocity_family = 'DQ' if use_quads else 'DG'
 trace_family = "HDiv Trace"
 degree = 1
 U = VectorFunctionSpace(mesh, velocity_family, degree)
 V = FunctionSpace(mesh, pressure_family, degree)
-T = FunctionSpace(mesh, trace_family, degree)
+if is_multiplier_continuous:
+    LagrangeElement = FiniteElement("Lagrange", mesh.ufl_cell(), degree)
+    C0TraceElement = LagrangeElement["facet"]
+    T = FunctionSpace(mesh, C0TraceElement)
+else:
+    T = FunctionSpace(mesh, trace_family, degree)
 W = U * V * T
 
 # Trial and test functions
@@ -61,8 +67,8 @@ u_projected = sigma_e
 
 # Hybridization parameter
 beta_0 = Constant(1.0e0)
-# beta = beta_0 / h
-beta = beta_0
+beta = beta_0 / h
+# beta = beta_0
 
 # Mixed classical terms
 a = (dot(u, v) - div(v) * p - q * div(u)) * dx
@@ -76,7 +82,9 @@ L += 0.5 * f * div(v) * dx
 a += lambda_h("+") * dot(v, n)("+") * dS + mu_h("+") * dot(u, n)("+") * dS
 a += beta("+") * (lambda_h("+") - p("+")) * (mu_h("+") - q("+")) * dS
 # Weakly imposed BC
-a += (p_boundaries * dot(v, n) + mu_h * (dot(u, n) - dot(u_projected, n))) * ds
+# a += (p_boundaries * dot(v, n) + mu_h * (dot(u, n) - dot(u_projected, n))) * ds
+# a += (p_boundaries * dot(v, n) - mu_h * dot(u_projected, n)) * ds
+a += (p_boundaries * dot(v, n) - mu_h * dot(u, n)) * ds  # this one looks right
 a += beta * (lambda_h - p_boundaries) * mu_h * ds
 
 F = a - L
@@ -101,8 +109,8 @@ params = {
     },
 }
 
-# problem = NonlinearVariationalProblem(F, solution, bcs=bc_multiplier)
-problem = NonlinearVariationalProblem(F, solution)
+problem = NonlinearVariationalProblem(F, solution, bcs=bc_multiplier)
+# problem = NonlinearVariationalProblem(F, solution)
 solver = NonlinearVariationalSolver(problem, solver_parameters=params)
 solver.snes.ksp.setConvergenceHistory()
 solver.solve()

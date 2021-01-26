@@ -20,13 +20,19 @@ mesh = UnitSquareMesh(N, N, quadrilateral=use_quads)
 comm = mesh.comm
 
 # Function space declaration
+is_multiplier_continuous = True
 pressure_family = 'DQ' if use_quads else 'DG'
 velocity_family = 'DQ' if use_quads else 'DG'
-trace_family = "HDiv Trace"
 degree = 1
 U = VectorFunctionSpace(mesh, velocity_family, degree)
 V = FunctionSpace(mesh, pressure_family, degree)
-T = FunctionSpace(mesh, trace_family, degree)
+if is_multiplier_continuous:
+    LagrangeElement = FiniteElement("Lagrange", mesh.ufl_cell(), degree)
+    C0TraceElement = LagrangeElement["facet"]
+    T = FunctionSpace(mesh, C0TraceElement)
+else:
+    trace_family = "HDiv Trace"
+    T = FunctionSpace(mesh, trace_family, degree)
 W = U * V * T
 
 # Trial and test functions
@@ -52,6 +58,7 @@ f_expression = div(-grad(p_exact))
 f = Function(V).interpolate(f_expression)
 
 # Dirichlet BCs
+bc_multiplier = DirichletBC(W.sub(2), p_exact, "on_boundary")
 bcs = DirichletBC(W[0], sigma_e, "on_boundary", method="geometric")
 
 # BCs
@@ -81,7 +88,7 @@ a += delta_1 * dot(u_hat, n) * q * ds
 # a += delta_1 * dot(u, n) * q * ds
 # L = -delta_1 * dot(u_projected, n) * q * ds
 a += delta_1 * lambda_h("+") * jump(v, n=n) * dS
-# a += delta_1 * lambda_h * dot(v, n) * ds
+a += delta_1 * lambda_h * dot(v, n) * ds
 # L = -delta_1 * p_boundaries * dot(v, n) * ds
 
 # Mass balance least-square
@@ -95,7 +102,7 @@ a += delta_3 * inner(curl(u), curl(v)) * dx
 a += mu_h("+") * jump(u_hat, n=n) * dS
 
 # Weakly imposed BC from hybridization
-a += mu_h * (lambda_h - p_boundaries) * ds
+# a += mu_h * (lambda_h - p_boundaries) * ds
 # ###
 # a += (
 #     (mu_h - q) * (lambda_h - p_boundaries) * ds
@@ -146,7 +153,8 @@ params = {
 #     },
 # }
 
-problem = NonlinearVariationalProblem(F, solution)
+# problem = NonlinearVariationalProblem(F, solution)
+problem = NonlinearVariationalProblem(F, solution, bcs=bc_multiplier)
 solver = NonlinearVariationalSolver(problem, solver_parameters=params)
 solver.snes.ksp.setConvergenceHistory()
 solver.solve()
