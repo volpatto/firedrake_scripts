@@ -212,7 +212,7 @@ def calculate_condition_number(
     backend: str = "scipy", 
     imag_threshold: float = 1e-5,
     zero_tol: float = 1e-10,
-    is_negative_spectrum: bool = False
+    is_negative_spectrum: bool = True
 ):
     backend = backend.lower()
 
@@ -242,7 +242,8 @@ def calculate_condition_number(
         S.setDimensions(nev=num_of_factors, mpd=num_of_factors)
         # S.setKrylovSchurDetectZeros(detect=True)
         S.setTolerances(max_it=2000)
-        S.setWhichEigenpairs(SLEPc.EPS.Which.LARGEST_REAL)
+        # S.setWhichEigenpairs(SLEPc.EPS.Which.LARGEST_REAL)
+        S.setWhichEigenpairs(SLEPc.EPS.Which.LARGEST_MAGNITUDE)
         S.solve()
 
         nconv = S.getConverged()
@@ -808,7 +809,7 @@ def solve_poisson_sdhm(
     num_elements_y, 
     degree=1, 
     use_quads=False,
-    is_multiplier_continuous=True
+    is_multiplier_continuous=False
 ):
     # Defining the mesh
     mesh = UnitSquareMesh(num_elements_x, num_elements_y, quadrilateral=use_quads)
@@ -911,7 +912,7 @@ def solve_poisson_hdg(
     num_elements_y, 
     degree=1, 
     use_quads=False,
-    is_multiplier_continuous=True
+    is_multiplier_continuous=False
 ):
     # Defining the mesh
     mesh = UnitSquareMesh(num_elements_x, num_elements_y, quadrilateral=use_quads)
@@ -1010,7 +1011,7 @@ def solve_poisson_cgh(
     num_elements_y, 
     degree=1, 
     use_quads=False,
-    is_multiplier_continuous=True
+    is_multiplier_continuous=False
 ):
     # Defining the mesh
     mesh = UnitSquareMesh(num_elements_x, num_elements_y, quadrilateral=use_quads)
@@ -1252,12 +1253,13 @@ def solve_poisson_lsh(
     # delta_3 = Constant(1)
     # delta_4 = Constant(1)
     # delta_5 = Constant(1)
-    delta_0 = h * h
+    delta = h * h
+    delta_0 = delta
     delta_1 = Constant(0)
-    delta_2 = h * h
-    delta_3 = h * h
-    delta_4 = h * h
-    delta_5 = h * h
+    delta_2 = delta
+    delta_3 = delta
+    delta_4 = delta
+    delta_5 = delta
 
     # Numerical flux trace
     u_hat = u + beta * (p - lambda_h) * n
@@ -1381,13 +1383,13 @@ solvers_options = {
     # "sdhm": solve_poisson_sdhm,
     # "ls": solve_poisson_ls,
     # "dls": solve_poisson_dls,
-    "lsh": solve_poisson_lsh,
+    # "lsh": solve_poisson_lsh,
     # "vms": solve_poisson_vms,
     # "dvms": solve_poisson_dvms,
     # "mixed_RT": solve_poisson_mixed_RT,
     # "hdg": solve_poisson_hdg,
     # "cgh": solve_poisson_cgh,
-    # "ldgc": solve_poisson_ldgc,
+    "ldgc": solve_poisson_ldgc,
 }
 
 degree = 1
