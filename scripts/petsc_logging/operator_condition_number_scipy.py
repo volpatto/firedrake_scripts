@@ -1246,27 +1246,40 @@ def solve_poisson_lsh(
     beta_avg = beta_0 / h("+")
 
     # Stabilizing parameter
-    delta_1 = Constant(1)
-    delta_2 = Constant(1)
-    delta_3 = Constant(1)
+    # delta_0 = Constant(1)
+    # delta_1 = Constant(1)
+    # delta_2 = Constant(1)
+    # delta_3 = Constant(1)
+    # delta_4 = Constant(1)
+    # delta_5 = Constant(1)
+    delta_0 = h * h
+    delta_1 = Constant(0)
+    delta_2 = h * h
+    delta_3 = h * h
+    delta_4 = h * h
+    delta_5 = h * h
 
     # Numerical flux trace
     u_hat = u + beta * (p - lambda_h) * n
+    v_hat = v + beta * (q - mu_h) * n
 
-    # Flux least-squares
-    a = (
-        (inner(u, v) - q * div(u) - p * div(v) + inner(grad(p), grad(q)))
-        * delta_1
-        * dx
-    )
-    # These terms below are unsymmetric
-    a += delta_1 * jump(u_hat, n=n) * q("+") * dS
-    a += delta_1 * dot(u_hat, n) * q * ds
-    # a += delta_1 * dot(u, n) * q * ds
-    # L = -delta_1 * dot(u_projected, n) * q * ds
-    a += delta_1 * lambda_h("+") * jump(v, n=n) * dS
-    a += delta_1 * lambda_h * dot(v, n) * ds
-    # L = -delta_1 * p_boundaries * dot(v, n) * ds
+    # # Flux least-squares
+    # a = (
+    #     (inner(u, v) - q * div(u) - p * div(v) + inner(grad(p), grad(q)))
+    #     * delta_1
+    #     * dx
+    # )
+    # # These terms below are unsymmetric
+    # a += delta_1 * jump(u_hat, n=n) * q("+") * dS
+    # a += delta_1 * dot(u_hat, n) * q * ds
+    # # a += delta_1 * dot(u, n) * q * ds
+    # # L = -delta_1 * dot(u_projected, n) * q * ds
+    # a += delta_1 * lambda_h("+") * jump(v, n=n) * dS
+    # a += delta_1 * lambda_h * dot(v, n) * ds
+    # # L = -delta_1 * p_boundaries * dot(v, n) * ds
+
+    # Flux Least-squares as in DG
+    a = delta_0 * inner(u + grad(p), v + grad(q)) * dx
 
     # Mass balance least-square
     a += delta_2 * div(u) * div(v) * dx
@@ -1277,6 +1290,10 @@ def solve_poisson_lsh(
 
     # Hybridization terms
     a += mu_h("+") * jump(u_hat, n=n) * dS
+    a += delta_4 * (p("+") - lambda_h("+")) * (q("+") - mu_h("+")) * dS
+    a += delta_4 * (p - lambda_h) * (q - mu_h) * ds
+    a += delta_5 * (dot(u, n)("+") - dot(u_hat, n)("+")) * (dot(v, n)("+") - dot(v_hat, n)("+")) * dS
+    a += delta_5 * (dot(u, n) - dot(u_hat, n)) * (dot(v, n) - dot(v_hat, n)) * ds
 
     # Weakly imposed BC from hybridization
     # a += mu_h * (lambda_h - p_boundaries) * ds
@@ -1364,13 +1381,13 @@ solvers_options = {
     # "sdhm": solve_poisson_sdhm,
     # "ls": solve_poisson_ls,
     # "dls": solve_poisson_dls,
-    # "lsh": solve_poisson_lsh,  # this method implementation should be reviewed (regarding BC handling)
+    "lsh": solve_poisson_lsh,
     # "vms": solve_poisson_vms,
     # "dvms": solve_poisson_dvms,
     # "mixed_RT": solve_poisson_mixed_RT,
     # "hdg": solve_poisson_hdg,
     # "cgh": solve_poisson_cgh,
-    "ldgc": solve_poisson_ldgc,
+    # "ldgc": solve_poisson_ldgc,
 }
 
 degree = 1
@@ -1393,7 +1410,7 @@ for current_solver in solvers_options:
     )
 
 # N = 5
-# result = solve_poisson_ldgc(N, N, degree=1, use_quads=True)
+# result = solve_poisson_lsh(N, N, degree=1, use_quads=True)
 
 # print(f'Is symmetric? {result.is_operator_symmetric}')
 # print(f'nnz: {result.nnz}')
@@ -1405,8 +1422,8 @@ for current_solver in solvers_options:
 # my_cmap = copy.copy(plt.cm.get_cmap("winter"))
 # my_cmap.set_bad(color="lightgray")
 # # plot_matrix_primal_hybrid_full(result.form, result.bcs, cmap=my_cmap)
-# # plot_matrix_mixed_hybrid_full(result.form, result.bcs, cmap=my_cmap)
-# plot_matrix_hybrid_multiplier(result.form, trace_index=1, bcs=result.bcs, cmap=my_cmap)
+# plot_matrix_mixed_hybrid_full(result.form, result.bcs, cmap=my_cmap)
+# # plot_matrix_hybrid_multiplier(result.form, trace_index=2, bcs=result.bcs, cmap=my_cmap)
 # # plot_matrix(result.assembled_form, cmap=my_cmap)
 # # plot_matrix_mixed(result.assembled_form, cmap=my_cmap)
 # plt.tight_layout()
