@@ -231,38 +231,28 @@ def calculate_condition_number(
         largest_eigenvalues = real_largest_eigenvalues[real_largest_eigenvalues > zero_tol]
         condition_number = largest_eigenvalues.max() / smallest_eigenvalues.min()
     elif backend == "slepc":
-        S = SLEPc.EPS()
+        S = SLEPc.SVD()
         S.create()
-        S.setOperators(A)
-        is_operator_symmetric = A.isSymmetric(tol=1e-8)
-        if is_operator_symmetric:
-            S.setProblemType(SLEPc.EPS.ProblemType.HEP)
-        else:
-            S.setProblemType(SLEPc.EPS.ProblemType.NHEP)
-        S.setDimensions(nev=num_of_factors, mpd=num_of_factors)
-        # S.setKrylovSchurDetectZeros(detect=True)
+        S.setOperator(A)
+        S.setType(SLEPc.SVD.Type.LAPACK)
+        S.setDimensions(nsv=num_of_factors)
         S.setTolerances(max_it=2000)
-        # S.setWhichEigenpairs(SLEPc.EPS.Which.LARGEST_REAL)
-        S.setWhichEigenpairs(SLEPc.EPS.Which.LARGEST_MAGNITUDE)
+        S.setWhichSingularTriplets(SLEPc.SVD.Which.LARGEST)
         S.solve()
 
-        nconv = S.getConverged()
-        eigenvalues_list = list()
-        if nconv > 0:
-            for i in range(nconv):
-                eigenval = S.getEigenvalue(i)
-                eigenvalues_list.append(eigenval)
+        num_converged_values = S.getConverged()
+        singular_values_list = list()
+        if num_converged_values > 0:
+            for i in range(num_converged_values):
+                singular_value = S.getValue(i)
+                singular_values_list.append(singular_value)
         else:
-            raise RuntimeError("SLEPc EPS has not converged.")
+            raise RuntimeError("SLEPc SVD has not converged.")
 
-        eigenvalues = np.array(eigenvalues_list)
-        eigenvalues = filter_real_part_in_array(eigenvalues, imag_threshold)
-        if is_negative_spectrum:
-            eigenvalues = np.abs(eigenvalues[np.abs(eigenvalues) > zero_tol])
-        else:
-            eigenvalues = eigenvalues[eigenvalues > zero_tol]
+        singular_values = np.array(singular_values_list)
 
-        condition_number = eigenvalues.max() / eigenvalues.min()
+        singular_values = singular_values[singular_values > zero_tol]
+        condition_number = singular_values.max() / singular_values.min()
     else:
         raise NotImplementedError("The required method for condition number estimation is currently unavailable.")
 
@@ -327,6 +317,7 @@ def solve_poisson_ls(num_elements_x, num_elements_y, degree=1, use_quads=False):
     v, q = TestFunctions(W)
 
     # Mesh entities
+    h = CellDiameter(mesh)
     x, y = SpatialCoordinate(mesh)
 
     # Exact solution
@@ -339,10 +330,15 @@ def solve_poisson_ls(num_elements_x, num_elements_y, degree=1, use_quads=False):
     # Dirichlet BCs
     bcs = DirichletBC(W[0], sigma_e, "on_boundary")
 
+    # Stabilization parameters
+    delta_1 = Constant(1)
+    delta_2 = Constant(1)
+    delta_3 = Constant(1)
+
     # Least-squares terms
-    a = inner(u + grad(p), v + grad(q)) * dx
-    a += div(u) * div(v) * dx
-    a += inner(curl(u), curl(v)) * dx
+    a = delta_1 * inner(u + grad(p), v + grad(q)) * dx
+    a += delta_2 * div(u) * div(v) * dx
+    a += delta_3 * inner(curl(u), curl(v)) * dx
 
     A = assemble(a, bcs=bcs, mat_type="aij")
     petsc_mat = A.M.handle
@@ -860,14 +856,20 @@ def solve_poisson_sdhm(
     # beta = beta_0 / h
     beta = beta_0
 
+    # Stabilization parameters
+    delta_0 = Constant(-1)
+    delta_1 = Constant(-0.5) * h * h
+    delta_2 = Constant(0.5) * h * h
+    delta_3 = Constant(0.5) * h * h
+
     # Mixed classical terms
-    a = (dot(u, v) - div(v) * p - q * div(u)) * dx
-    L = -f * q * dx
+    a = (dot(u, v) - div(v) * p + delta_0 * q * div(u)) * dx
+    L = delta_0 * f * q * dx
     # Stabilizing terms
-    a += -0.5 * inner(u + grad(p), v + grad(q)) * dx
-    a += 0.5 * div(u) * div(v) * dx
-    a += 0.5 * inner(curl(u), curl(v)) * dx
-    L += 0.5 * f * div(v) * dx
+    a += delta_1 * inner(u + grad(p), v + grad(q)) * dx
+    a += delta_2 * div(u) * div(v) * dx
+    a += delta_3 * inner(curl(u), curl(v)) * dx
+    L += delta_2 * f * div(v) * dx
     # Hybridization terms
     a += lambda_h("+") * dot(v, n)("+") * dS + mu_h("+") * dot(u, n)("+") * dS
     a += beta("+") * (lambda_h("+") - p("+")) * (mu_h("+") - q("+")) * dS
@@ -1383,13 +1385,13 @@ solvers_options = {
     # "sdhm": solve_poisson_sdhm,
     # "ls": solve_poisson_ls,
     # "dls": solve_poisson_dls,
-    # "lsh": solve_poisson_lsh,
+    "lsh": solve_poisson_lsh,
     # "vms": solve_poisson_vms,
     # "dvms": solve_poisson_dvms,
     # "mixed_RT": solve_poisson_mixed_RT,
     # "hdg": solve_poisson_hdg,
     # "cgh": solve_poisson_cgh,
-    "ldgc": solve_poisson_ldgc,
+    # "ldgc": solve_poisson_ldgc,
 }
 
 degree = 1
