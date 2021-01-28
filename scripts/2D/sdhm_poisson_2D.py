@@ -20,10 +20,9 @@ mesh = UnitSquareMesh(N, N, quadrilateral=use_quads)
 comm = mesh.comm
 
 # Function space declaration
-is_multiplier_continuous = True
+is_multiplier_continuous = False
 pressure_family = 'DQ' if use_quads else 'DG'
 velocity_family = 'DQ' if use_quads else 'DG'
-trace_family = "HDiv Trace"
 degree = 1
 U = VectorFunctionSpace(mesh, velocity_family, degree)
 V = FunctionSpace(mesh, pressure_family, degree)
@@ -32,6 +31,7 @@ if is_multiplier_continuous:
     C0TraceElement = LagrangeElement["facet"]
     T = FunctionSpace(mesh, C0TraceElement)
 else:
+    trace_family = "HDiv Trace"
     T = FunctionSpace(mesh, trace_family, degree)
 W = U * V * T
 
@@ -66,18 +66,24 @@ p_boundaries = Constant(0.0)
 u_projected = sigma_e
 
 # Hybridization parameter
-beta_0 = Constant(1.0e0)
-beta = beta_0 / h
-# beta = beta_0
+beta_0 = Constant(1.0e-18)
+# beta = beta_0 / h
+beta = beta_0
+
+# Stabilization parameters
+delta_0 = Constant(-1)
+delta_1 = Constant(-0.5) * h * h
+delta_2 = Constant(0.5) * h * h
+delta_3 = Constant(0.5) * h * h
 
 # Mixed classical terms
-a = (dot(u, v) - div(v) * p - q * div(u)) * dx
-L = -f * q * dx
+a = (dot(u, v) - div(v) * p + delta_0 * q * div(u)) * dx
+L = delta_0 * f * q * dx
 # Stabilizing terms
-a += -0.5 * inner(u + grad(p), v + grad(q)) * dx
-a += 0.5 * div(u) * div(v) * dx
-a += 0.5 * inner(curl(u), curl(v)) * dx
-L += 0.5 * f * div(v) * dx
+a += delta_1 * inner(u + grad(p), v + grad(q)) * dx
+a += delta_2 * div(u) * div(v) * dx
+a += delta_3 * inner(curl(u), curl(v)) * dx
+L += delta_2 * f * div(v) * dx
 # Hybridization terms
 a += lambda_h("+") * dot(v, n)("+") * dS + mu_h("+") * dot(u, n)("+") * dS
 a += beta("+") * (lambda_h("+") - p("+")) * (mu_h("+") - q("+")) * dS
