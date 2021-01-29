@@ -259,10 +259,7 @@ def calculate_condition_number(
     return condition_number
 
 
-def solve_poisson_cg(num_elements_x, num_elements_y, degree=1, use_quads=False):
-    # Defining the mesh
-    mesh = UnitSquareMesh(num_elements_x, num_elements_y, quadrilateral=use_quads)
-
+def solve_poisson_cg(mesh, degree=1, use_quads=False):
     # Function space declaration
     V = FunctionSpace(mesh, "CG", degree)
 
@@ -301,10 +298,7 @@ def solve_poisson_cg(num_elements_x, num_elements_y, degree=1, use_quads=False):
     return result
 
 
-def solve_poisson_ls(num_elements_x, num_elements_y, degree=1, use_quads=False):
-    # Defining the mesh
-    mesh = UnitSquareMesh(num_elements_x, num_elements_y, quadrilateral=use_quads)
-
+def solve_poisson_ls(mesh, degree=1):
     # Function space declaration
     pressure_family = 'CG'
     velocity_family = 'CG'
@@ -364,10 +358,7 @@ def solve_poisson_ls(num_elements_x, num_elements_y, degree=1, use_quads=False):
     return result
 
 
-def solve_poisson_cgls(num_elements_x, num_elements_y, degree=1, use_quads=False):
-    # Defining the mesh
-    mesh = UnitSquareMesh(num_elements_x, num_elements_y, quadrilateral=use_quads)
-
+def solve_poisson_cgls(mesh, degree=1):
     # Function space declaration
     pressure_family = 'CG'
     velocity_family = 'CG'
@@ -428,10 +419,7 @@ def solve_poisson_cgls(num_elements_x, num_elements_y, degree=1, use_quads=False
     return result
 
 
-def solve_poisson_vms(num_elements_x, num_elements_y, degree=1, use_quads=False):
-    # Defining the mesh
-    mesh = UnitSquareMesh(num_elements_x, num_elements_y, quadrilateral=use_quads)
-
+def solve_poisson_vms(mesh, degree=1):
     # Function space declaration
     pressure_family = 'CG'
     velocity_family = 'CG'
@@ -494,11 +482,9 @@ def solve_poisson_vms(num_elements_x, num_elements_y, degree=1, use_quads=False)
     return result
 
 
-def solve_poisson_mixed_RT(num_elements_x, num_elements_y, degree=1, use_quads=False):
-    # Defining the mesh
-    mesh = UnitSquareMesh(num_elements_x, num_elements_y, quadrilateral=use_quads)
-
+def solve_poisson_mixed_RT(mesh, degree=1):
     # Function space declaration
+    use_quads = str(mesh.ufl_cell()) == "quadrilateral"
     if use_quads:
         hdiv_family = 'RTCF'
         pressure_family = 'DQ'
@@ -554,11 +540,9 @@ def solve_poisson_mixed_RT(num_elements_x, num_elements_y, degree=1, use_quads=F
     return result
 
 
-def solve_poisson_dgls(num_elements_x, num_elements_y, degree=1, use_quads=False):
-    # Defining the mesh
-    mesh = UnitSquareMesh(num_elements_x, num_elements_y, quadrilateral=use_quads)
-
+def solve_poisson_dgls(mesh, degree=1):
     # Function space declaration
+    use_quads = str(mesh.ufl_cell()) == "quadrilateral"
     pressure_family = 'DQ' if use_quads else 'DG'
     velocity_family = 'DQ' if use_quads else 'DG'
     U = VectorFunctionSpace(mesh, velocity_family, degree)
@@ -608,7 +592,7 @@ def solve_poisson_dgls(num_elements_x, num_elements_y, degree=1, use_quads=False
     # a += 0.5 * h * h * div(u) * div(v) * dx
     # a += 0.5 * h * h * inner(curl(u), curl(v)) * dx
     # L += 0.5 * h * h * f * div(v) * dx
-    a += -0.5 * inner((u + grad(p)), v + grad(q)) * dx
+    a += -0.5 * inner(u + grad(p), v + grad(q)) * dx
     a += 0.5 * div(u) * div(v) * dx
     a += 0.5 * inner(curl(u), curl(v)) * dx
 
@@ -636,11 +620,9 @@ def solve_poisson_dgls(num_elements_x, num_elements_y, degree=1, use_quads=False
     return result
 
 
-def solve_poisson_dvms(num_elements_x, num_elements_y, degree=1, use_quads=False):
-    # Defining the mesh
-    mesh = UnitSquareMesh(num_elements_x, num_elements_y, quadrilateral=use_quads)
-
+def solve_poisson_dvms(mesh, degree=1):
     # Function space declaration
+    use_quads = str(mesh.ufl_cell()) == "quadrilateral"
     pressure_family = 'DQ' if use_quads else 'DG'
     velocity_family = 'DQ' if use_quads else 'DG'
     U = VectorFunctionSpace(mesh, velocity_family, degree)
@@ -719,11 +701,9 @@ def solve_poisson_dvms(num_elements_x, num_elements_y, degree=1, use_quads=False
     return result
 
 
-def solve_poisson_dls(num_elements_x, num_elements_y, degree=1, use_quads=False):
-    # Defining the mesh
-    mesh = UnitSquareMesh(num_elements_x, num_elements_y, quadrilateral=use_quads)
-
+def solve_poisson_dls(mesh, degree=1):
     # Function space declaration
+    use_quads = str(mesh.ufl_cell()) == "quadrilateral"
     pressure_family = 'DQ' if use_quads else 'DG'
     velocity_family = 'DQ' if use_quads else 'DG'
     U = VectorFunctionSpace(mesh, velocity_family, degree)
@@ -801,16 +781,12 @@ def solve_poisson_dls(num_elements_x, num_elements_y, degree=1, use_quads=False)
 
 
 def solve_poisson_sdhm(
-    num_elements_x, 
-    num_elements_y, 
-    degree=1, 
-    use_quads=False,
+    mesh, 
+    degree=1,
     is_multiplier_continuous=False
 ):
-    # Defining the mesh
-    mesh = UnitSquareMesh(num_elements_x, num_elements_y, quadrilateral=use_quads)
-
     # Function space declaration
+    use_quads = str(mesh.ufl_cell()) == "quadrilateral"
     pressure_family = 'DQ' if use_quads else 'DG'
     velocity_family = 'DQ' if use_quads else 'DG'
     trace_family = "HDiv Trace"
@@ -910,16 +886,12 @@ def solve_poisson_sdhm(
 
 
 def solve_poisson_hdg(
-    num_elements_x, 
-    num_elements_y, 
-    degree=1, 
-    use_quads=False,
+    mesh, 
+    degree=1,
     is_multiplier_continuous=False
 ):
-    # Defining the mesh
-    mesh = UnitSquareMesh(num_elements_x, num_elements_y, quadrilateral=use_quads)
-
     # Function space declaration
+    use_quads = str(mesh.ufl_cell()) == "quadrilateral"
     pressure_family = 'DQ' if use_quads else 'DG'
     velocity_family = 'DQ' if use_quads else 'DG'
     trace_family = "HDiv Trace"
@@ -1009,16 +981,12 @@ def solve_poisson_hdg(
 
 
 def solve_poisson_cgh(
-    num_elements_x, 
-    num_elements_y, 
+    mesh, 
     degree=1, 
-    use_quads=False,
     is_multiplier_continuous=False
 ):
-    # Defining the mesh
-    mesh = UnitSquareMesh(num_elements_x, num_elements_y, quadrilateral=use_quads)
-
     # Function space declaration
+    use_quads = str(mesh.ufl_cell()) == "quadrilateral"
     pressure_family = 'DQ' if use_quads else 'DG'
     trace_family = "HDiv Trace"
     V = FunctionSpace(mesh, pressure_family, degree)
@@ -1103,16 +1071,12 @@ def solve_poisson_cgh(
 
 
 def solve_poisson_ldgc(
-    num_elements_x, 
-    num_elements_y, 
+    mesh, 
     degree=1, 
-    use_quads=False,
     is_multiplier_continuous=True
 ):
-    # Defining the mesh
-    mesh = UnitSquareMesh(num_elements_x, num_elements_y, quadrilateral=use_quads)
-
     # Function space declaration
+    use_quads = str(mesh.ufl_cell()) == "quadrilateral"
     primal_family = "DQ" if use_quads else "DG"
     V = FunctionSpace(mesh, primal_family, degree)
     if is_multiplier_continuous:
@@ -1199,16 +1163,12 @@ def solve_poisson_ldgc(
 
 
 def solve_poisson_lsh(
-    num_elements_x, 
-    num_elements_y, 
+    mesh, 
     degree=1, 
-    use_quads=False,
     is_multiplier_continuous=False
 ):
-    # Defining the mesh
-    mesh = UnitSquareMesh(num_elements_x, num_elements_y, quadrilateral=use_quads)
-
     # Function space declaration
+    use_quads = str(mesh.ufl_cell()) == "quadrilateral"
     pressure_family = 'DQ' if use_quads else 'DG'
     velocity_family = 'DQ' if use_quads else 'DG'
     U = VectorFunctionSpace(mesh, velocity_family, degree)
@@ -1352,6 +1312,7 @@ def hp_refinement_cond_number_calculation(
         "Symmetric": list(),
         "nnz": list(),
         "dofs": list(),
+        "h": list(),
         "Condition Number": list(),
     }
     element_kind = "Quad" if quadrilateral else "Tri"
@@ -1359,14 +1320,17 @@ def hp_refinement_cond_number_calculation(
     for degree in pbar:
         for n in numel_xy:
             pbar.set_description(f"Processing {name} - degree = {degree} - N = {n}")
-            result = solver(n, n, degree=degree, use_quads=quadrilateral)
+            mesh = UnitSquareMesh(n, n, quadrilateral=quadrilateral)
+            result = solver(mesh, degree=degree)
 
+            current_cell_size = mesh.cell_sizes.dat.data_ro.min() if not quadrilateral else 1 / n
             results_dict["Element"].append(element_kind)
             results_dict["Number of Elements"].append(n * n)
             results_dict["Degree"].append(degree)
             results_dict["Symmetric"].append(result.is_operator_symmetric)
             results_dict["nnz"].append(result.nnz)
             results_dict["dofs"].append(result.number_of_dofs)
+            results_dict["h"].append(current_cell_size)
             results_dict["Condition Number"].append(result.condition_number)
 
     os.makedirs("./cond_number_results/results_%s" % name, exist_ok=True)
