@@ -209,10 +209,8 @@ def filter_real_part_in_array(array: np.ndarray, imag_threshold: float = 1e-5) -
 
 def calculate_condition_number(
     A, num_of_factors, 
-    backend: str = "scipy", 
-    imag_threshold: float = 1e-5,
-    zero_tol: float = 1e-10,
-    is_negative_spectrum: bool = True
+    backend: str = "scipy",
+    zero_tol: float = 1e-8
 ):
     backend = backend.lower()
 
@@ -221,22 +219,24 @@ def calculate_condition_number(
         Mnp = csr_matrix(A.getValuesCSR()[::-1], shape=size)
         Mnp.eliminate_zeros()
 
-        largest_eigenvalues = eigs(Mnp, k=num_of_factors, which="LM", return_eigenvectors=False)
-        real_largest_eigenvalues = filter_real_part_in_array(largest_eigenvalues, imag_threshold)
+        singular_values = svds(
+            A=Mnp, 
+            k=num_of_factors, 
+            which="LM", 
+            maxiter=5000, 
+            return_singular_vectors=False, 
+            solver="lobpcg"
+        )
+        singular_values = singular_values[singular_values > zero_tol]
 
-        smallest_eigenvalues = eigs(Mnp, k=num_of_factors, which="SM", return_eigenvectors=False)
-        real_smallest_eigenvalues = filter_real_part_in_array(smallest_eigenvalues, imag_threshold)
-
-        smallest_eigenvalues = real_smallest_eigenvalues[real_smallest_eigenvalues > zero_tol]
-        largest_eigenvalues = real_largest_eigenvalues[real_largest_eigenvalues > zero_tol]
-        condition_number = largest_eigenvalues.max() / smallest_eigenvalues.min()
+        condition_number = singular_values.max() / singular_values.min()
     elif backend == "slepc":
         S = SLEPc.SVD()
         S.create()
         S.setOperator(A)
         S.setType(SLEPc.SVD.Type.LAPACK)
         S.setDimensions(nsv=num_of_factors)
-        S.setTolerances(max_it=2000)
+        S.setTolerances(max_it=5000)
         S.setWhichSingularTriplets(SLEPc.SVD.Which.LARGEST)
         S.solve()
 
@@ -285,8 +285,8 @@ def solve_poisson_cg(num_elements_x, num_elements_y, degree=1, use_quads=False):
     nnz = Mnp.nnz
     number_of_dofs = V.dim()
 
-    num_of_factors = int(0.95 * number_of_dofs) - 1
-    condition_number = calculate_condition_number(petsc_mat, num_of_factors, backend="slepc")
+    num_of_factors = int(number_of_dofs) - 1
+    condition_number = calculate_condition_number(petsc_mat, num_of_factors)
 
     result = ConditionNumberResult(
         form=a,
@@ -349,8 +349,8 @@ def solve_poisson_ls(num_elements_x, num_elements_y, degree=1, use_quads=False):
     nnz = Mnp.nnz
     number_of_dofs = W.dim()
 
-    num_of_factors = int(0.95 * number_of_dofs) - 1
-    condition_number = calculate_condition_number(petsc_mat, num_of_factors, backend="scipy")
+    num_of_factors = int(number_of_dofs) - 1
+    condition_number = calculate_condition_number(petsc_mat, num_of_factors)
 
     result = ConditionNumberResult(
         form=a,
@@ -413,8 +413,8 @@ def solve_poisson_cgls(num_elements_x, num_elements_y, degree=1, use_quads=False
     nnz = Mnp.nnz
     number_of_dofs = W.dim()
 
-    num_of_factors = int(0.95 * number_of_dofs) - 1
-    condition_number = calculate_condition_number(petsc_mat, num_of_factors, backend="slepc")
+    num_of_factors = int(number_of_dofs) - 1
+    condition_number = calculate_condition_number(petsc_mat, num_of_factors)
 
     result = ConditionNumberResult(
         form=a,
@@ -479,8 +479,8 @@ def solve_poisson_vms(num_elements_x, num_elements_y, degree=1, use_quads=False)
     nnz = Mnp.nnz
     number_of_dofs = W.dim()
 
-    num_of_factors = int(0.95 * number_of_dofs) - 1
-    condition_number = calculate_condition_number(petsc_mat, num_of_factors, backend="slepc")
+    num_of_factors = int(number_of_dofs) - 1
+    condition_number = calculate_condition_number(petsc_mat, num_of_factors)
 
     result = ConditionNumberResult(
         form=a,
@@ -539,8 +539,8 @@ def solve_poisson_mixed_RT(num_elements_x, num_elements_y, degree=1, use_quads=F
     nnz = Mnp.nnz
     number_of_dofs = W.dim()
 
-    num_of_factors = int(0.95 * number_of_dofs) - 1
-    condition_number = calculate_condition_number(petsc_mat, num_of_factors, backend="slepc")
+    num_of_factors = int(number_of_dofs) - 1
+    condition_number = calculate_condition_number(petsc_mat, num_of_factors)
 
     result = ConditionNumberResult(
         form=a,
@@ -621,8 +621,8 @@ def solve_poisson_dgls(num_elements_x, num_elements_y, degree=1, use_quads=False
     nnz = Mnp.nnz
     number_of_dofs = W.dim()
 
-    num_of_factors = int(0.95 * number_of_dofs) - 1
-    condition_number = calculate_condition_number(petsc_mat, num_of_factors, backend="slepc")
+    num_of_factors = int(number_of_dofs) - 1
+    condition_number = calculate_condition_number(petsc_mat, num_of_factors)
 
     result = ConditionNumberResult(
         form=a,
@@ -704,8 +704,8 @@ def solve_poisson_dvms(num_elements_x, num_elements_y, degree=1, use_quads=False
     nnz = Mnp.nnz
     number_of_dofs = W.dim()
 
-    num_of_factors = int(0.95 * number_of_dofs) - 1
-    condition_number = calculate_condition_number(petsc_mat, num_of_factors, backend="slepc")
+    num_of_factors = int(number_of_dofs) - 1
+    condition_number = calculate_condition_number(petsc_mat, num_of_factors)
 
     result = ConditionNumberResult(
         form=a,
@@ -785,8 +785,8 @@ def solve_poisson_dls(num_elements_x, num_elements_y, degree=1, use_quads=False)
     nnz = Mnp.nnz
     number_of_dofs = W.dim()
 
-    num_of_factors = int(0.95 * number_of_dofs) - 1
-    condition_number = calculate_condition_number(petsc_mat, num_of_factors, backend="slepc")
+    num_of_factors = int(number_of_dofs) - 1
+    condition_number = calculate_condition_number(petsc_mat, num_of_factors)
 
     result = ConditionNumberResult(
         form=a,
@@ -893,8 +893,8 @@ def solve_poisson_sdhm(
     nnz = Mnp.nnz
     number_of_dofs = Mnp.shape[0]
 
-    num_of_factors = int(0.99 * number_of_dofs) - 1
-    condition_number = calculate_condition_number(petsc_mat, num_of_factors, backend="slepc", is_negative_spectrum=True)
+    num_of_factors = int(number_of_dofs) - 1
+    condition_number = calculate_condition_number(petsc_mat, num_of_factors)
 
     result = ConditionNumberResult(
         form=a,
@@ -992,8 +992,8 @@ def solve_poisson_hdg(
     nnz = Mnp.nnz
     number_of_dofs = Mnp.shape[0]
 
-    num_of_factors = int(0.99 * number_of_dofs) - 1
-    condition_number = calculate_condition_number(petsc_mat, num_of_factors, backend="slepc", is_negative_spectrum=True)
+    num_of_factors = int(number_of_dofs) - 1
+    condition_number = calculate_condition_number(petsc_mat, num_of_factors)
 
     result = ConditionNumberResult(
         form=a,
@@ -1086,8 +1086,8 @@ def solve_poisson_cgh(
     nnz = Mnp.nnz
     number_of_dofs = Mnp.shape[0]
 
-    num_of_factors = int(0.99 * number_of_dofs) - 1
-    condition_number = calculate_condition_number(petsc_mat, num_of_factors, backend="slepc", is_negative_spectrum=True)
+    num_of_factors = int(number_of_dofs) - 1
+    condition_number = calculate_condition_number(petsc_mat, num_of_factors)
 
     result = ConditionNumberResult(
         form=a,
@@ -1182,8 +1182,8 @@ def solve_poisson_ldgc(
     nnz = Mnp.nnz
     number_of_dofs = Mnp.shape[0]
 
-    num_of_factors = int(0.99 * number_of_dofs) - 1
-    condition_number = calculate_condition_number(petsc_mat, num_of_factors, backend="slepc", is_negative_spectrum=False)
+    num_of_factors = int(number_of_dofs) - 1
+    condition_number = calculate_condition_number(petsc_mat, num_of_factors)
 
     result = ConditionNumberResult(
         form=a,
@@ -1320,8 +1320,8 @@ def solve_poisson_lsh(
     nnz = Mnp.nnz
     number_of_dofs = Mnp.shape[0]
 
-    num_of_factors = int(0.99 * number_of_dofs) - 1
-    condition_number = calculate_condition_number(petsc_mat, num_of_factors, backend="slepc", is_negative_spectrum=True)
+    num_of_factors = int(number_of_dofs) - 1
+    condition_number = calculate_condition_number(petsc_mat, num_of_factors)
 
     result = ConditionNumberResult(
         form=a,
@@ -1379,19 +1379,19 @@ def hp_refinement_cond_number_calculation(
 
 # Solver options
 solvers_options = {
-    # "cg": solve_poisson_cg,
-    # "cgls": solve_poisson_cgls,
-    # "dgls": solve_poisson_dgls,
-    # "sdhm": solve_poisson_sdhm,
-    # "ls": solve_poisson_ls,
-    # "dls": solve_poisson_dls,
+    "cg": solve_poisson_cg,
+    "cgls": solve_poisson_cgls,
+    "dgls": solve_poisson_dgls,
+    "sdhm": solve_poisson_sdhm,
+    "ls": solve_poisson_ls,
+    "dls": solve_poisson_dls,
     "lsh": solve_poisson_lsh,
-    # "vms": solve_poisson_vms,
-    # "dvms": solve_poisson_dvms,
-    # "mixed_RT": solve_poisson_mixed_RT,
-    # "hdg": solve_poisson_hdg,
-    # "cgh": solve_poisson_cgh,
-    # "ldgc": solve_poisson_ldgc,
+    "vms": solve_poisson_vms,
+    "dvms": solve_poisson_dvms,
+    "mixed_RT": solve_poisson_mixed_RT,
+    "hdg": solve_poisson_hdg,
+    "cgh": solve_poisson_cgh,
+    "ldgc": solve_poisson_ldgc,
 }
 
 degree = 1
