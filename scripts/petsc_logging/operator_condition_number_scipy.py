@@ -701,6 +701,73 @@ def solve_poisson_dvms(mesh, degree=1):
     return result
 
 
+def solve_poisson_sipg(mesh, degree=1):
+    # Function space declaration
+    use_quads = str(mesh.ufl_cell()) == "quadrilateral"
+    pressure_family = 'DQ' if use_quads else 'DG'
+    velocity_family = 'DQ' if use_quads else 'DG'
+    V = FunctionSpace(mesh, pressure_family, degree)
+
+    # Trial and test functions
+    p = TrialFunction(V)
+    q = TestFunction(V)
+
+    # Mesh entities
+    n = FacetNormal(mesh)
+    h = CellDiameter(mesh)
+    x, y = SpatialCoordinate(mesh)
+
+    # Exact solution
+    p_exact = sin(2 * pi * x) * sin(2 * pi * y)
+    exact_solution = Function(V).interpolate(p_exact)
+    exact_solution.rename("Exact pressure", "label")
+
+    # Forcing function
+    f_expression = div(-grad(p_exact))
+    f = Function(V).interpolate(f_expression)
+
+    # Dirichlet BCs
+    bcs = DirichletBC(V, p_exact, "on_boundary", method="geometric")
+
+    # Edge stabilizing parameter
+    beta0 = Constant(1e1)
+    beta = beta0 / h
+
+    # Symmetry term. Choose if the method is SIPG (-1) or NIPG (1)
+    s = Constant(-1)
+
+    # Classical volumetric terms
+    a = inner(grad(p), grad(q)) * dx
+    L = f * q * dx
+    # DG edge terms
+    a += s * dot(jump(p, n), avg(grad(q))) * dS - dot(avg(grad(p)), jump(q, n)) * dS
+    # Edge stabilizing terms
+    a += beta("+") * dot(jump(p, n), jump(q, n)) * dS
+
+    A = assemble(a, bcs=bcs, mat_type="aij")
+    petsc_mat = A.M.handle
+    is_symmetric = petsc_mat.isSymmetric(tol=1e-8)
+    size = petsc_mat.getSize()
+    Mnp = csr_matrix(petsc_mat.getValuesCSR()[::-1], shape=size)
+    Mnp.eliminate_zeros()
+    nnz = Mnp.nnz
+    number_of_dofs = V.dim()
+
+    num_of_factors = int(number_of_dofs) - 1
+    condition_number = calculate_condition_number(petsc_mat, num_of_factors)
+
+    result = ConditionNumberResult(
+        form=a,
+        assembled_form=A,
+        condition_number=condition_number,
+        sparse_operator=Mnp,
+        number_of_dofs=number_of_dofs,
+        nnz=nnz,
+        is_operator_symmetric=is_symmetric
+    )
+    return result
+
+
 def solve_poisson_dls(mesh, degree=1):
     # Function space declaration
     use_quads = str(mesh.ufl_cell()) == "quadrilateral"
@@ -1343,19 +1410,20 @@ def hp_refinement_cond_number_calculation(
 
 # Solver options
 solvers_options = {
-    "cg": solve_poisson_cg,
-    "cgls": solve_poisson_cgls,
-    "dgls": solve_poisson_dgls,
-    "sdhm": solve_poisson_sdhm,
-    "ls": solve_poisson_ls,
-    "dls": solve_poisson_dls,
-    "lsh": solve_poisson_lsh,
-    "vms": solve_poisson_vms,
-    "dvms": solve_poisson_dvms,
-    "mixed_RT": solve_poisson_mixed_RT,
-    "hdg": solve_poisson_hdg,
-    "cgh": solve_poisson_cgh,
-    "ldgc": solve_poisson_ldgc,
+    # "cg": solve_poisson_cg,
+    # "cgls": solve_poisson_cgls,
+    # "dgls": solve_poisson_dgls,
+    # "sdhm": solve_poisson_sdhm,
+    # "ls": solve_poisson_ls,
+    # "dls": solve_poisson_dls,
+    # "lsh": solve_poisson_lsh,
+    # "vms": solve_poisson_vms,
+    # "dvms": solve_poisson_dvms,
+    # "mixed_RT": solve_poisson_mixed_RT,
+    # "hdg": solve_poisson_hdg,
+    # "cgh": solve_poisson_cgh,
+    # "ldgc": solve_poisson_ldgc,
+    "sipg": solve_poisson_sipg,
 }
 
 degree = 1
@@ -1378,7 +1446,8 @@ for current_solver in solvers_options:
     )
 
 # N = 5
-# result = solve_poisson_lsh(N, N, degree=1, use_quads=True)
+# mesh = UnitSquareMesh(N, N, quadrilateral=True)
+# result = solve_poisson_sipg(mesh, degree=1)
 
 # print(f'Is symmetric? {result.is_operator_symmetric}')
 # print(f'nnz: {result.nnz}')
@@ -1390,9 +1459,9 @@ for current_solver in solvers_options:
 # my_cmap = copy.copy(plt.cm.get_cmap("winter"))
 # my_cmap.set_bad(color="lightgray")
 # # plot_matrix_primal_hybrid_full(result.form, result.bcs, cmap=my_cmap)
-# plot_matrix_mixed_hybrid_full(result.form, result.bcs, cmap=my_cmap)
+# # plot_matrix_mixed_hybrid_full(result.form, result.bcs, cmap=my_cmap)
 # # plot_matrix_hybrid_multiplier(result.form, trace_index=2, bcs=result.bcs, cmap=my_cmap)
-# # plot_matrix(result.assembled_form, cmap=my_cmap)
+# plot_matrix(result.assembled_form, cmap=my_cmap)
 # # plot_matrix_mixed(result.assembled_form, cmap=my_cmap)
 # plt.tight_layout()
 # plt.savefig("sparse_pattern.png")
