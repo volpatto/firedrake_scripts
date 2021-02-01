@@ -40,13 +40,6 @@ exact_solution.rename("Exact pressure", "label")
 sigma_e = Function(U, name='Exact velocity')
 sigma_e.project(-grad(p_exact))
 
-# Exact solution
-p_exact = sin(2 * pi * x) * sin(2 * pi * y)
-exact_solution = Function(V).interpolate(p_exact)
-exact_solution.rename("Exact pressure", "label")
-sigma_e = Function(U, name='Exact velocity')
-sigma_e.project(-grad(p_exact))
-
 # Forcing function
 f_expression = div(-grad(p_exact))
 f = Function(V).interpolate(f_expression)
