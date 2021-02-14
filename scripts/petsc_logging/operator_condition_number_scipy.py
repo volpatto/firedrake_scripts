@@ -734,7 +734,7 @@ def solve_poisson_sipg(mesh, degree=1):
     beta = beta0 / h
 
     # Symmetry term. Choose if the method is SIPG (-1) or NIPG (1)
-    s = Constant(-1)
+    s = Constant(1)
 
     # Classical volumetric terms
     a = inner(grad(p), grad(q)) * dx
@@ -1410,19 +1410,19 @@ def hp_refinement_cond_number_calculation(
 
 # Solver options
 solvers_options = {
-    # "cg": solve_poisson_cg,
-    # "cgls": solve_poisson_cgls,
-    # "dgls": solve_poisson_dgls,
-    # "sdhm": solve_poisson_sdhm,
-    # "ls": solve_poisson_ls,
-    # "dls": solve_poisson_dls,
-    # "lsh": solve_poisson_lsh,
-    # "vms": solve_poisson_vms,
-    # "dvms": solve_poisson_dvms,
-    # "mixed_RT": solve_poisson_mixed_RT,
-    # "hdg": solve_poisson_hdg,
-    # "cgh": solve_poisson_cgh,
-    # "ldgc": solve_poisson_ldgc,
+    "cg": solve_poisson_cg,
+    "cgls": solve_poisson_cgls,
+    "dgls": solve_poisson_dgls,
+    "sdhm": solve_poisson_sdhm,
+    "ls": solve_poisson_ls,
+    "dls": solve_poisson_dls,
+    "lsh": solve_poisson_lsh,
+    "vms": solve_poisson_vms,
+    "dvms": solve_poisson_dvms,
+    "mixed_RT": solve_poisson_mixed_RT,
+    "hdg": solve_poisson_hdg,
+    "cgh": solve_poisson_cgh,
+    "ldgc": solve_poisson_ldgc,
     "sipg": solve_poisson_sipg,
 }
 
