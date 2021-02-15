@@ -22,11 +22,17 @@ comm = mesh.comm
 # Function space declaration
 pressure_family = 'DQ' if use_quads else 'DG'
 velocity_family = 'DQ' if use_quads else 'DG'
-trace_family = "DGT"
 degree = 1
+is_multiplier_continuous = True
 U = VectorFunctionSpace(mesh, velocity_family, degree - 1)  # just for post-processing
 V = FunctionSpace(mesh, pressure_family, degree)
-T = FunctionSpace(mesh, trace_family, degree)
+if is_multiplier_continuous:
+    LagrangeElement = FiniteElement("Lagrange", mesh.ufl_cell(), degree)
+    C0TraceElement = LagrangeElement["facet"]
+    T = FunctionSpace(mesh, C0TraceElement)
+else:
+    trace_family = "DGT"
+    T = FunctionSpace(mesh, trace_family, degree)
 W = V * T
 
 # Trial and test functions

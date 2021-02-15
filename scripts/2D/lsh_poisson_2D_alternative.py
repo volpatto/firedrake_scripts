@@ -87,19 +87,19 @@ delta_5 = h * h
 u_hat = u + beta * (p - lambda_h) * n
 v_hat = v + beta * (q - mu_h) * n
 
-# Flux least-squares
-a = (
-    (inner(u, v) - q * div(u) - p * div(v) + inner(grad(p), grad(q)))
-    * delta_1
-    * dx
-)
-a += delta_1 * jump(u_hat, n=n) * q("+") * dS
-a += delta_1 * dot(u_hat, n) * q * ds
-# a += delta_1 * dot(u, n) * q * ds
-# L = -delta_1 * dot(u_projected, n) * q * ds
-a += delta_1 * lambda_h("+") * jump(v, n=n) * dS
-a += delta_1 * lambda_h * dot(v, n) * ds
-# L = -delta_1 * p_boundaries * dot(v, n) * ds
+# # Flux least-squares
+# a = (
+#     (inner(u, v) - q * div(u) - p * div(v) + inner(grad(p), grad(q)))
+#     * delta_1
+#     * dx
+# )
+# a += delta_1 * jump(u_hat, n=n) * q("+") * dS
+# a += delta_1 * dot(u_hat, n) * q * ds
+# # a += delta_1 * dot(u, n) * q * ds
+# # L = -delta_1 * dot(u_projected, n) * q * ds
+# a += delta_1 * lambda_h("+") * jump(v, n=n) * dS
+# a += delta_1 * lambda_h * dot(v, n) * ds
+# # L = -delta_1 * p_boundaries * dot(v, n) * ds
 
 # Flux Least-squares as in DG
 a = delta_0 * inner(u + grad(p), v + grad(q)) * dx
