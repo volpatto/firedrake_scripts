@@ -566,7 +566,7 @@ def solve_poisson_dgls(mesh, degree=1):
     sigma_e.project(-grad(p_exact))
 
     # Dirichlet BCs
-    bcs = DirichletBC(W[0], sigma_e, "on_boundary", method="geometric")
+    # bcs = DirichletBC(W[0], sigma_e, "on_boundary", method="geometric")
 
     # Average cell size and mesh dependent stabilization
     h_avg = (h("+") + h("-")) / 2.0
@@ -583,11 +583,11 @@ def solve_poisson_dgls(mesh, degree=1):
     a += jump(v, n) * avg(p) * dS - avg(q) * jump(u, n) * dS
     # Edge stabilizing terms
     # ** Badia-Codina based
-    # a += (eta_p / h_avg) * (jump(u, n) * jump(v, n)) * dS
-    # a += (eta_u / h_avg) * dot(jump(p, n), jump(q, n)) * dS
+    a += (eta_p / h_avg) * (jump(u, n) * jump(v, n)) * dS
+    a += (eta_u / h_avg) * dot(jump(p, n), jump(q, n)) * dS
     # ** Mesh independent terms
-    a += jump(u, n) * jump(v, n) * dS
-    a += dot(jump(p, n), jump(q, n)) * dS
+    # a += jump(u, n) * jump(v, n) * dS
+    # a += dot(jump(p, n), jump(q, n)) * dS
     # Volumetric stabilizing terms
     # a += 0.5 * h * h * div(u) * div(v) * dx
     # a += 0.5 * h * h * inner(curl(u), curl(v)) * dx
@@ -595,8 +595,10 @@ def solve_poisson_dgls(mesh, degree=1):
     a += -0.5 * inner(u + grad(p), v + grad(q)) * dx
     a += 0.5 * div(u) * div(v) * dx
     a += 0.5 * inner(curl(u), curl(v)) * dx
+    # Weakly imposed boundary conditions
+    a += dot(v, n) * p * ds - q * dot(u, n) * ds
 
-    A = assemble(a, bcs=bcs, mat_type="aij")
+    A = assemble(a, mat_type="aij")
     petsc_mat = A.M.handle
     is_symmetric = petsc_mat.isSymmetric(tol=1e-8)
     size = petsc_mat.getSize()
@@ -646,7 +648,7 @@ def solve_poisson_dvms(mesh, degree=1):
     sigma_e.project(-grad(p_exact))
 
     # Dirichlet BCs
-    bcs = DirichletBC(W[0], sigma_e, "on_boundary", method="geometric")
+    # bcs = DirichletBC(W[0], sigma_e, "on_boundary", method="geometric")
 
     # Average cell size and mesh dependent stabilization
     h_avg = (h("+") + h("-")) / 2.0
@@ -663,11 +665,11 @@ def solve_poisson_dvms(mesh, degree=1):
     a += jump(v, n) * avg(p) * dS - avg(q) * jump(u, n) * dS
     # Edge stabilizing terms
     # ** Badia-Codina based
-    # a += (eta_p / h_avg) * (jump(u, n) * jump(v, n)) * dS
-    # a += (eta_u / h_avg) * dot(jump(p, n), jump(q, n)) * dS
+    a += (eta_p / h_avg) * (jump(u, n) * jump(v, n)) * dS
+    a += (eta_u / h_avg) * dot(jump(p, n), jump(q, n)) * dS
     # ** Mesh independent (original)
-    a += jump(u, n) * jump(v, n) * dS  # not considered in the original paper
-    a += dot(jump(p, n), jump(q, n)) * dS
+    # a += jump(u, n) * jump(v, n) * dS  # not considered in the original paper
+    # a += dot(jump(p, n), jump(q, n)) * dS
     # Volumetric stabilizing terms
     a += 0.5 * inner(u + grad(p), grad(q) - v) * dx
     a += 0.5 * h * h * div(u) * div(v) * dx
@@ -676,8 +678,10 @@ def solve_poisson_dvms(mesh, degree=1):
     # a += 0.5 * div(u) * div(v) * dx
     # a += 0.5 * inner(curl(u), curl(v)) * dx
     # L += 0.5 * f * div(v) * dx
+    # Weakly imposed boundary conditions
+    a += dot(v, n) * p * ds - q * dot(u, n) * ds
 
-    A = assemble(a, bcs=bcs, mat_type="aij")
+    A = assemble(a, mat_type="aij")
     petsc_mat = A.M.handle
     is_symmetric = petsc_mat.isSymmetric(tol=1e-8)
     size = petsc_mat.getSize()
@@ -794,7 +798,7 @@ def solve_poisson_dls(mesh, degree=1):
     sigma_e.project(-grad(p_exact))
 
     # Dirichlet BCs
-    bcs = DirichletBC(W[0], sigma_e, "on_boundary", method="geometric")
+    # bcs = DirichletBC(W[0], sigma_e, "on_boundary", method="geometric")
 
     # Average cell size and mesh dependent stabilization
     h_avg = (h("+") + h("-")) / 2.0
@@ -809,23 +813,33 @@ def solve_poisson_dls(mesh, degree=1):
     # eta_u_bc = h / L0  # method B in the Badia-Codina paper
     eta_u_bc = 1
 
+    # Least-Squares weights
+    delta = Constant(1.0)
+    # delta = h
+    delta_0 = delta
+    delta_1 = delta
+    delta_2 = delta
+    delta_3 = 1 / h
+    delta_4 = 1 / h
+
     # Least-squares terms
-    a = inner(u + grad(p), v + grad(q)) * dx
-    a += div(u) * div(v) * dx
-    a += inner(curl(u), curl(v)) * dx
+    a = delta_0 * inner(u + grad(p), v + grad(q)) * dx
+    a += delta_1 * div(u) * div(v) * dx
+    a += delta_2 * inner(curl(u), curl(v)) * dx
     # Edge stabilizing terms
     # ** Badia-Codina based (better results) **
-    a += (eta_p / h_avg) * (jump(u, n) * jump(v, n)) * dS
-    a += (eta_u / h_avg) * dot(jump(p, n), jump(q, n)) * dS
-    a += (eta_u_bc / h) * p * q * ds
+    a += avg(delta_3) * (jump(u, n) * jump(v, n)) * dS
+    a += avg(delta_4) * dot(jump(p, n), jump(q, n)) * dS
+    a += delta_3 * p * q * ds  # may decrease convergente rates
+    a += delta_4 * dot(u, n) * dot(v, n) * ds
     # ** Mesh independent **
     # a += jump(u, n) * jump(v, n) * dS
     # a += dot(jump(p, n), jump(q, n)) * dS
     # a += p * q * ds
 
-    A = assemble(a, bcs=bcs, mat_type="aij")
+    A = assemble(a, mat_type="aij")
     petsc_mat = A.M.handle
-    is_symmetric = petsc_mat.isSymmetric(tol=1e-8)
+    is_symmetric = petsc_mat.isSymmetric(tol=1e-12)
     size = petsc_mat.getSize()
     Mnp = csr_matrix(petsc_mat.getValuesCSR()[::-1], shape=size)
     Mnp.eliminate_zeros()
@@ -1283,8 +1297,9 @@ def solve_poisson_lsh(
     # delta_4 = Constant(1)
     # delta_5 = Constant(1)
     delta = h * h
+    # delta = h
     delta_0 = delta
-    delta_1 = Constant(0)
+    delta_1 = delta
     delta_2 = delta
     delta_3 = delta
     delta_4 = delta
@@ -1294,7 +1309,7 @@ def solve_poisson_lsh(
     u_hat = u + beta * (p - lambda_h) * n
     v_hat = v + beta * (q - mu_h) * n
 
-    # # Flux least-squares
+    # Flux least-squares
     # a = (
     #     (inner(u, v) - q * div(u) - p * div(v) + inner(grad(p), grad(q)))
     #     * delta_1
@@ -1323,8 +1338,8 @@ def solve_poisson_lsh(
     a += mu_h("+") * jump(u_hat, n=n) * dS
     a += delta_4 * (p("+") - lambda_h("+")) * (q("+") - mu_h("+")) * dS
     a += delta_4 * (p - lambda_h) * (q - mu_h) * ds
-    a += delta_5 * (dot(u, n)("+") - dot(u_hat, n)("+")) * (dot(v, n)("+") - dot(v_hat, n)("+")) * dS
-    a += delta_5 * (dot(u, n) - dot(u_hat, n)) * (dot(v, n) - dot(v_hat, n)) * ds
+    # a += delta_5 * (dot(u, n)("+") - dot(u_hat, n)("+")) * (dot(v, n)("+") - dot(v_hat, n)("+")) * dS
+    # a += delta_5 * (dot(u, n) - dot(u_hat, n)) * (dot(v, n) - dot(v_hat, n)) * ds
 
     # Weakly imposed BC from hybridization
     # a += mu_h * (lambda_h - p_boundaries) * ds
@@ -1410,20 +1425,20 @@ def hp_refinement_cond_number_calculation(
 
 # Solver options
 solvers_options = {
-    "cg": solve_poisson_cg,
-    "cgls": solve_poisson_cgls,
-    "dgls": solve_poisson_dgls,
-    "sdhm": solve_poisson_sdhm,
-    "ls": solve_poisson_ls,
+    # "cg": solve_poisson_cg,
+    # "cgls": solve_poisson_cgls,
+    # "dgls": solve_poisson_dgls,
+    # "sdhm": solve_poisson_sdhm,
+    # "ls": solve_poisson_ls,
     "dls": solve_poisson_dls,
-    "lsh": solve_poisson_lsh,
-    "vms": solve_poisson_vms,
-    "dvms": solve_poisson_dvms,
-    "mixed_RT": solve_poisson_mixed_RT,
-    "hdg": solve_poisson_hdg,
-    "cgh": solve_poisson_cgh,
-    "ldgc": solve_poisson_ldgc,
-    "sipg": solve_poisson_sipg,
+    # "lsh": solve_poisson_lsh,
+    # "vms": solve_poisson_vms,
+    # "dvms": solve_poisson_dvms,
+    # "mixed_RT": solve_poisson_mixed_RT,
+    # "hdg": solve_poisson_hdg,
+    # "cgh": solve_poisson_cgh,
+    # "ldgc": solve_poisson_ldgc,
+    # "sipg": solve_poisson_sipg,
 }
 
 degree = 1

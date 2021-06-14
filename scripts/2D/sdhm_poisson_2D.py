@@ -10,7 +10,7 @@ def print(content_to_print):
     return PETSc.Sys.Print(content_to_print)
 
 
-parameters["pyop2_options"]["lazy_evaluation"] = False
+# parameters["pyop2_options"]["lazy_evaluation"] = False
 PETSc.Log.begin()
 
 # Defining the mesh
@@ -58,7 +58,6 @@ f_expression = div(-grad(p_exact))
 f = Function(V).interpolate(f_expression)
 
 # Dirichlet BCs
-bcs = DirichletBC(W[0], sigma_e, "on_boundary", method="geometric")
 bc_multiplier = DirichletBC(W.sub(2), Constant(0.0), "on_boundary")
 
 # BCs
@@ -66,9 +65,9 @@ p_boundaries = Constant(0.0)
 u_projected = sigma_e
 
 # Hybridization parameter
-beta_0 = Constant(1.0e-18)
-# beta = beta_0 / h
-beta = beta_0
+beta_0 = Constant(1.0e0)
+beta = beta_0 / h
+# beta = beta_0
 
 # Stabilization parameters
 delta_0 = Constant(-1)

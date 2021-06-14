@@ -10,17 +10,17 @@ def print(content_to_print):
     return PETSc.Sys.Print(content_to_print)
 
 
-parameters["pyop2_options"]["lazy_evaluation"] = False
+# parameters["pyop2_options"]["lazy_evaluation"] = False
 PETSc.Log.begin()
 
 # Defining the mesh
-N = 15
-use_quads = True
+N = 10
+use_quads = False
 mesh = UnitSquareMesh(N, N, quadrilateral=use_quads)
 comm = mesh.comm
 
 # Function space declaration
-is_multiplier_continuous = True
+is_multiplier_continuous = False
 pressure_family = 'DQ' if use_quads else 'DG'
 velocity_family = 'DQ' if use_quads else 'DG'
 degree = 1
@@ -59,7 +59,6 @@ f = Function(V).interpolate(f_expression)
 
 # Dirichlet BCs
 bc_multiplier = DirichletBC(W.sub(1), p_exact, "on_boundary")
-# bcs = DirichletBC(W[0], sigma_e, "on_boundary", method="geometric")
 
 # BCs
 p_boundaries = Constant(0.0)

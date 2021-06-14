@@ -59,7 +59,7 @@ f = Function(V).interpolate(f_expression)
 
 # Dirichlet BCs
 bc_multiplier = DirichletBC(W.sub(2), p_exact, "on_boundary")
-bcs = DirichletBC(W[0], sigma_e, "on_boundary", method="geometric")
+# bcs = DirichletBC(W[0], sigma_e, "on_boundary", method="geometric")
 
 # BCs
 p_boundaries = Constant(0.0)
@@ -113,13 +113,13 @@ a += delta_3 * inner(curl(u), curl(v)) * dx
 
 # Hybridization terms
 a += mu_h("+") * jump(u_hat, n=n) * dS
-# a += dot(u_hat, n)("+") * dot(v_hat, n)("+") * dS
-# a += dot(u_hat, n)("+") * dot(v, n)("+") * dS
+# These terms related to primal variable tracer are optional
 a += avg(delta_4) * (p("+") - lambda_h("+")) * (q("+") - mu_h("+")) * dS
 a += delta_4 * (p - lambda_h) * (q - mu_h) * ds
-a += avg(delta_5) * (dot(u, n)("+") - dot(u_hat, n)("+")) * (dot(v, n)("+") - dot(v_hat, n)("+")) * dS
-a += delta_5 * (dot(u, n) - dot(u_hat, n)) * (dot(v, n) - dot(v_hat, n)) * ds
-# a += delta_4 * (lambda_h("+") - p("+")) * (mu_h("+") - q("+")) * dS
+# These terms related to numerical fluxes are required to solve the problem properly
+## This first term (internal edges) can be removed without problems
+# a += avg(delta_5) * (dot(u, n)("+") - dot(u_hat, n)("+")) * (dot(v, n)("+") - dot(v_hat, n)("+")) * dS
+# a += delta_5 * (dot(u, n) - dot(u_hat, n)) * (dot(v, n) - dot(v_hat, n)) * ds
 
 # Weakly imposed BC from hybridization
 # a += mu_h * (lambda_h - p_boundaries) * ds

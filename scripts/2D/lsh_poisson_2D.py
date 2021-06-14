@@ -59,7 +59,6 @@ f = Function(V).interpolate(f_expression)
 
 # Dirichlet BCs
 bc_multiplier = DirichletBC(W.sub(2), p_exact, "on_boundary")
-bcs = DirichletBC(W[0], sigma_e, "on_boundary", method="geometric")
 
 # BCs
 p_boundaries = Constant(0.0)
@@ -112,7 +111,7 @@ a += mu_h("+") * jump(u_hat, n=n) * dS
 F = a - L
 
 # Solving with Static Condensation
-PETSc.Sys.Print("*******************************************\nSolving using static condensation.\n")
+print("*******************************************\nSolving using static condensation.\n")
 params = {
     "snes_type": "ksponly",
     "mat_type": "matfree",

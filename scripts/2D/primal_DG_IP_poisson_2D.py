@@ -42,9 +42,6 @@ sigma_e.project(-grad(p_exact))
 f_expression = div(-grad(p_exact))
 f = Function(V).interpolate(f_expression)
 
-# Dirichlet BCs
-bcs = DirichletBC(V, p_exact, "on_boundary", method="geometric")
-
 # Edge stabilizing parameter
 beta0 = Constant(1e1)
 beta = beta0 / h
@@ -59,16 +56,21 @@ L = f * q * dx
 a += s * dot(jump(p, n), avg(grad(q))) * dS - dot(avg(grad(p)), jump(q, n)) * dS
 # Edge stabilizing terms
 a += beta("+") * dot(jump(p, n), jump(q, n)) * dS
+# Weak boundary conditions
+a += beta * p * q * ds
+L += beta * exact_solution * q * ds
 
 # Solving the system
 solver_parameters = {
+    "ksp_monitor": None,
+    "ksp_view": None,
     "mat_type": "aij",
     "ksp_type": "preonly",
     "pc_type": "lu",
     "pc_factor_mat_solver_type": "mumps",
 }
 solution = Function(V)
-problem = LinearVariationalProblem(a, L, solution, bcs=bcs)
+problem = LinearVariationalProblem(a, L, solution, bcs=[])
 solver = LinearVariationalSolver(problem, solver_parameters=solver_parameters)
 solver.solve()
 
@@ -86,7 +88,7 @@ plt.xlabel("x")
 plt.ylabel("y")
 plt.title("Exact solution for velocity")
 plt.savefig("exact_velocity.png")
-plt.show()
+# plt.show()
 
 # Plotting pressure field exact solution
 fig, axes = plt.subplots()
@@ -96,7 +98,7 @@ plt.xlabel("x")
 plt.ylabel("y")
 plt.title("Exact solution for pressure")
 plt.savefig("exact_pressure.png")
-plt.show()
+# plt.show()
 
 # Plotting velocity field numerical solution
 fig, axes = plt.subplots()
@@ -105,7 +107,7 @@ fig.colorbar(collection)
 plt.xlabel("x")
 plt.ylabel("y")
 plt.savefig("solution_velocity.png")
-plt.show()
+# plt.show()
 
 # Plotting pressure field numerical solution
 fig, axes = plt.subplots()
@@ -114,4 +116,4 @@ fig.colorbar(collection)
 plt.xlabel("x")
 plt.ylabel("y")
 plt.savefig("solution_pressure.png")
-plt.show()
+# plt.show()

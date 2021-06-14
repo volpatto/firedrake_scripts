@@ -23,7 +23,7 @@ comm = mesh.comm
 pressure_family = 'DQ' if use_quads else 'DG'
 velocity_family = 'DQ' if use_quads else 'DG'
 degree = 1
-is_multiplier_continuous = True
+is_multiplier_continuous = False
 U = VectorFunctionSpace(mesh, velocity_family, degree - 1)  # just for post-processing
 V = FunctionSpace(mesh, pressure_family, degree)
 if is_multiplier_continuous:
@@ -100,7 +100,6 @@ params = {
 }
 
 problem = NonlinearVariationalProblem(F, solution, bcs=bc_multiplier)
-# problem = NonlinearVariationalProblem(F, solution)
 solver = NonlinearVariationalSolver(problem, solver_parameters=params)
 solver.snes.ksp.setConvergenceHistory()
 solver.solve()
