@@ -47,22 +47,22 @@ f = Function(V).interpolate(f_expression)
 # Dirichlet BCs
 # bcs = DirichletBC(W[0], sigma_e, "on_boundary", method="geometric")
 
-# # Variational form
-# a = inner(grad(u), grad(v)) * dx
-# L = f * v * dx
-
 # Average cell size and mesh dependent stabilization
 h_avg = avg(h)
 
 # Jump stabilizing parameters based on Badia-Codina stabilized dG method
 L0 = 1
-eta_p = L0 * h_avg  # method B in the Badia-Codina paper
+eta_p = L0 * h  # method B in the Badia-Codina paper
 # eta_p = 1
 # eta_p = L0 * L0  # method D in the Badia-Codina paper
-eta_u = h_avg / L0  # method B in the Badia-Codina paper
+eta_u = h / L0  # method B in the Badia-Codina paper
 # eta_u = 1
 # eta_u_bc = h / L0  # method B in the Badia-Codina paper
 # eta_u_bc = 1
+
+# Nitsche's penalizing term
+beta_0 = Constant(1.0)
+beta = beta_0 / h
 
 # Mixed classical terms
 a = (dot(u, v) - div(v) * p + q * div(u)) * dx
@@ -70,9 +70,9 @@ L = f * q * dx
 # DG terms
 a += jump(v, n) * avg(p) * dS - avg(q) * jump(u, n) * dS
 # Edge stabilizing terms
-# ** Badia-Codina based
-a += (eta_p / h_avg) * (jump(u, n) * jump(v, n)) * dS
-a += (eta_u / h_avg) * dot(jump(p, n), jump(q, n)) * dS
+# ** ASGS Badia-Codina (2010) based
+a += (avg(eta_p) / h_avg) * (jump(u, n) * jump(v, n)) * dS
+a += (avg(eta_u) / h_avg) * dot(jump(p, n), jump(q, n)) * dS
 # ** Mesh independent (original)
 # a += jump(u, n) * jump(v, n) * dS  # not considered in the original paper
 # a += dot(jump(p, n), jump(q, n)) * dS
@@ -86,6 +86,14 @@ a += 0.5 * inner(u + grad(p), grad(q) - v) * dx
 # Weakly imposed boundary conditions
 a += dot(v, n) * p * ds - q * dot(u, n) * ds
 L += -q * dot(sigma_e, n) * ds
+# ** The terms below are based on ASGS Badia-Codina (2010), it is not a classical Nitsche's method
+a += (eta_p / h) * dot(u, n) * dot(v, n) * ds
+L += (eta_p / h) * dot(sigma_e, n) * dot(v, n) * ds
+a += (eta_u / h) * dot(p * n, q * n) * ds
+L += (eta_u / h) * dot(exact_solution * n, q * n) * ds
+# ** Classical Nitsche
+# a += beta * p * q * ds  # may decrease convergente rates (Nitsche)
+# L += beta * exact_solution * q * ds  # may decrease convergente rates (Nitsche)
 
 # Solving the system
 # solver_parameters = {
