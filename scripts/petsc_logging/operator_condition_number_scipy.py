@@ -1,10 +1,10 @@
 import attr
 from firedrake import *
 import numpy as np
-from logging import warning
 import matplotlib.pyplot as plt
 import matplotlib
-from scipy.sparse.linalg import svds, eigs, ArpackNoConvergence
+from scipy.linalg import svd
+from scipy.sparse.linalg import svds
 from scipy.sparse import csr_matrix
 from slepc4py import SLEPc
 import pandas as pd
@@ -12,6 +12,7 @@ from tqdm import tqdm
 import os
 
 matplotlib.use('Agg')
+
 
 @attr.s
 class ConditionNumberResult(object):
@@ -22,8 +23,7 @@ class ConditionNumberResult(object):
     number_of_dofs = attr.ib()
     nnz = attr.ib()
     is_operator_symmetric = attr.ib()
-    bcs = attr.ib(default=list())
-    
+    bcs = attr.ib(default=list())    
 
 
 def plot_matrix(assembled_form, **kwargs):
@@ -208,9 +208,11 @@ def filter_real_part_in_array(array: np.ndarray, imag_threshold: float = 1e-5) -
 
 
 def calculate_condition_number(
-    A, num_of_factors, 
+    A, 
+    num_of_factors, 
     backend: str = "scipy",
-    zero_tol: float = 1e-8
+    use_sparse: bool = False,
+    zero_tol: float = 1e-5
 ):
     backend = backend.lower()
 
@@ -219,14 +221,19 @@ def calculate_condition_number(
         Mnp = csr_matrix(A.getValuesCSR()[::-1], shape=size)
         Mnp.eliminate_zeros()
 
-        singular_values = svds(
-            A=Mnp, 
-            k=num_of_factors, 
-            which="LM", 
-            maxiter=5000, 
-            return_singular_vectors=False, 
-            solver="lobpcg"
-        )
+        if use_sparse:
+            singular_values = svds(
+                A=Mnp, 
+                k=num_of_factors, 
+                which="LM", 
+                maxiter=5000, 
+                return_singular_vectors=False, 
+                solver="lobpcg"
+            )
+        else:
+            M = Mnp.toarray()
+            singular_values = svd(M, compute_uv=False, check_finite=False)
+
         singular_values = singular_values[singular_values > zero_tol]
 
         condition_number = singular_values.max() / singular_values.min()
@@ -573,9 +580,15 @@ def solve_poisson_dgls(mesh, degree=1):
 
     # Jump stabilizing parameters based on Badia-Codina stabilized dG method
     L0 = 1
-    eta_p = L0 * h_avg  # method B in the Badia-Codina paper
+    eta_p = L0 * h  # method B in the Badia-Codina paper
+    # eta_p = 1
     # eta_p = L0 * L0  # method D in the Badia-Codina paper
-    eta_u = h_avg / L0  # method B in the Badia-Codina paper
+    eta_u = h / L0  # method B in the Badia-Codina paper
+    # eta_u = 1
+
+    # Nitsche's penalizing term
+    beta_0 = Constant(1.0)
+    beta = beta_0 / h
 
     # Mixed classical terms
     a = (dot(u, v) - div(v) * p - q * div(u)) * dx
@@ -583,8 +596,8 @@ def solve_poisson_dgls(mesh, degree=1):
     a += jump(v, n) * avg(p) * dS - avg(q) * jump(u, n) * dS
     # Edge stabilizing terms
     # ** Badia-Codina based
-    a += (eta_p / h_avg) * (jump(u, n) * jump(v, n)) * dS
-    a += (eta_u / h_avg) * dot(jump(p, n), jump(q, n)) * dS
+    a += (avg(eta_p) / h_avg) * (jump(u, n) * jump(v, n)) * dS
+    a += (avg(eta_u) / h_avg) * dot(jump(p, n), jump(q, n)) * dS
     # ** Mesh independent terms
     # a += jump(u, n) * jump(v, n) * dS
     # a += dot(jump(p, n), jump(q, n)) * dS
@@ -592,11 +605,19 @@ def solve_poisson_dgls(mesh, degree=1):
     # a += 0.5 * h * h * div(u) * div(v) * dx
     # a += 0.5 * h * h * inner(curl(u), curl(v)) * dx
     # L += 0.5 * h * h * f * div(v) * dx
-    a += -0.5 * inner(u + grad(p), v + grad(q)) * dx
-    a += 0.5 * div(u) * div(v) * dx
-    a += 0.5 * inner(curl(u), curl(v)) * dx
+    # a += -0.5 * inner(u + grad(p), v + grad(q)) * dx
+    # a += 0.5 * div(u) * div(v) * dx
+    # a += 0.5 * inner(curl(u), curl(v)) * dx
+    # ** Badia-Codina based
+    a += -eta_u * inner(u + grad(p), v + grad(q)) * dx
+    a += eta_p * div(u) * div(v) * dx
+    a += eta_p * inner(curl(u), curl(v)) * dx
     # Weakly imposed boundary conditions
     a += dot(v, n) * p * ds - q * dot(u, n) * ds
+    a += beta * p * q * ds  # may decrease convergente rates
+    # ** The terms below are based on ASGS Badia-Codina (2010), it is not a classical Nitsche's method
+    a += (eta_p / h) * dot(u, n) * dot(v, n) * ds
+    a += (eta_u / h) * dot(p * n, q * n) * ds
 
     A = assemble(a, mat_type="aij")
     petsc_mat = A.M.handle
@@ -655,9 +676,9 @@ def solve_poisson_dvms(mesh, degree=1):
 
     # Jump stabilizing parameters based on Badia-Codina stabilized dG method
     L0 = 1
-    eta_p = L0 * h_avg  # method B in the Badia-Codina paper
+    eta_p = L0 * h  # method B in the Badia-Codina paper
     # eta_p = L0 * L0  # method D in the Badia-Codina paper
-    eta_u = h_avg / L0  # method B in the Badia-Codina paper
+    eta_u = h / L0  # method B in the Badia-Codina paper
 
     # Mixed classical terms
     a = (dot(u, v) - div(v) * p + q * div(u)) * dx
@@ -665,21 +686,29 @@ def solve_poisson_dvms(mesh, degree=1):
     a += jump(v, n) * avg(p) * dS - avg(q) * jump(u, n) * dS
     # Edge stabilizing terms
     # ** Badia-Codina based
-    a += (eta_p / h_avg) * (jump(u, n) * jump(v, n)) * dS
-    a += (eta_u / h_avg) * dot(jump(p, n), jump(q, n)) * dS
+    a += (avg(eta_p) / h_avg) * (jump(u, n) * jump(v, n)) * dS
+    a += (avg(eta_u) / h_avg) * dot(jump(p, n), jump(q, n)) * dS
     # ** Mesh independent (original)
     # a += jump(u, n) * jump(v, n) * dS  # not considered in the original paper
     # a += dot(jump(p, n), jump(q, n)) * dS
     # Volumetric stabilizing terms
-    a += 0.5 * inner(u + grad(p), grad(q) - v) * dx
-    a += 0.5 * h * h * div(u) * div(v) * dx
+    # a += 0.5 * inner(u + grad(p), grad(q) - v) * dx
+    # a += 0.5 * h * h * div(u) * div(v) * dx
     # a += 0.5 * h * h * inner(curl(u), curl(v)) * dx
     # L += 0.5 * h * h * f * div(v) * dx
     # a += 0.5 * div(u) * div(v) * dx
     # a += 0.5 * inner(curl(u), curl(v)) * dx
     # L += 0.5 * f * div(v) * dx
+    # ** Badia-Codina based
+    a += eta_u * inner(u + grad(p), grad(q) - v) * dx
+    a += eta_p * div(u) * div(v) * dx
     # Weakly imposed boundary conditions
     a += dot(v, n) * p * ds - q * dot(u, n) * ds
+    # ** The terms below are based on ASGS Badia-Codina (2010), it is not a classical Nitsche's method
+    a += (eta_p / h) * dot(u, n) * dot(v, n) * ds
+    a += (eta_u / h) * dot(p * n, q * n) * ds  # may decrease convergente rates
+    # ** Classical Nitsche
+    # a += beta * p * q * ds  # may decrease convergente rates (Nitsche)
 
     A = assemble(a, mat_type="aij")
     petsc_mat = A.M.handle
@@ -709,7 +738,6 @@ def solve_poisson_sipg(mesh, degree=1):
     # Function space declaration
     use_quads = str(mesh.ufl_cell()) == "quadrilateral"
     pressure_family = 'DQ' if use_quads else 'DG'
-    velocity_family = 'DQ' if use_quads else 'DG'
     V = FunctionSpace(mesh, pressure_family, degree)
 
     # Trial and test functions
@@ -730,15 +758,12 @@ def solve_poisson_sipg(mesh, degree=1):
     f_expression = div(-grad(p_exact))
     f = Function(V).interpolate(f_expression)
 
-    # Dirichlet BCs
-    bcs = DirichletBC(V, p_exact, "on_boundary", method="geometric")
-
     # Edge stabilizing parameter
     beta0 = Constant(1e1)
     beta = beta0 / h
 
     # Symmetry term. Choose if the method is SIPG (-1) or NIPG (1)
-    s = Constant(1)
+    s = Constant(-1)
 
     # Classical volumetric terms
     a = inner(grad(p), grad(q)) * dx
@@ -747,8 +772,10 @@ def solve_poisson_sipg(mesh, degree=1):
     a += s * dot(jump(p, n), avg(grad(q))) * dS - dot(avg(grad(p)), jump(q, n)) * dS
     # Edge stabilizing terms
     a += beta("+") * dot(jump(p, n), jump(q, n)) * dS
+    # Weak boundary conditions
+    a += beta * p * q * ds
 
-    A = assemble(a, bcs=bcs, mat_type="aij")
+    A = assemble(a, mat_type="aij")
     petsc_mat = A.M.handle
     is_symmetric = petsc_mat.isSymmetric(tol=1e-8)
     size = petsc_mat.getSize()
@@ -828,10 +855,10 @@ def solve_poisson_dls(mesh, degree=1):
     a += delta_2 * inner(curl(u), curl(v)) * dx
     # Edge stabilizing terms
     # ** Badia-Codina based (better results) **
-    a += avg(delta_3) * (jump(u, n) * jump(v, n)) * dS
-    a += avg(delta_4) * dot(jump(p, n), jump(q, n)) * dS
-    a += delta_3 * p * q * ds  # may decrease convergente rates
-    a += delta_4 * dot(u, n) * dot(v, n) * ds
+    a += eta_u * avg(delta_3) * (jump(u, n) * jump(v, n)) * dS
+    a += eta_p * avg(delta_4) * dot(jump(p, n), jump(q, n)) * dS
+    a += eta_u_bc * delta_3 * p * q * ds  # may decrease convergente rates
+    a += eta_u_bc * delta_4 * dot(u, n) * dot(v, n) * ds
     # ** Mesh independent **
     # a += jump(u, n) * jump(v, n) * dS
     # a += dot(jump(p, n), jump(q, n)) * dS
@@ -1425,20 +1452,20 @@ def hp_refinement_cond_number_calculation(
 
 # Solver options
 solvers_options = {
-    # "cg": solve_poisson_cg,
-    # "cgls": solve_poisson_cgls,
-    # "dgls": solve_poisson_dgls,
-    # "sdhm": solve_poisson_sdhm,
-    # "ls": solve_poisson_ls,
+    "cg": solve_poisson_cg,
+    "cgls": solve_poisson_cgls,
+    "dgls": solve_poisson_dgls,
+    "sdhm": solve_poisson_sdhm,
+    "ls": solve_poisson_ls,
     "dls": solve_poisson_dls,
-    # "lsh": solve_poisson_lsh,
-    # "vms": solve_poisson_vms,
-    # "dvms": solve_poisson_dvms,
-    # "mixed_RT": solve_poisson_mixed_RT,
-    # "hdg": solve_poisson_hdg,
-    # "cgh": solve_poisson_cgh,
-    # "ldgc": solve_poisson_ldgc,
-    # "sipg": solve_poisson_sipg,
+    "lsh": solve_poisson_lsh,
+    "vms": solve_poisson_vms,
+    "dvms": solve_poisson_dvms,
+    "mixed_RT": solve_poisson_mixed_RT,
+    "hdg": solve_poisson_hdg,
+    "cgh": solve_poisson_cgh,
+    "ldgc": solve_poisson_ldgc,
+    "sipg": solve_poisson_sipg,
 }
 
 degree = 1
@@ -1462,7 +1489,7 @@ for current_solver in solvers_options:
 
 # N = 5
 # mesh = UnitSquareMesh(N, N, quadrilateral=True)
-# result = solve_poisson_sipg(mesh, degree=1)
+# result = solve_poisson_dgls(mesh, degree=1)
 
 # print(f'Is symmetric? {result.is_operator_symmetric}')
 # print(f'nnz: {result.nnz}')
@@ -1470,6 +1497,7 @@ for current_solver in solvers_options:
 # print(f'Condition Number: {result.condition_number}')
 
 # # Plotting the resulting matrix
+# matplotlib.use('TkAgg')
 # import copy
 # my_cmap = copy.copy(plt.cm.get_cmap("winter"))
 # my_cmap.set_bad(color="lightgray")
