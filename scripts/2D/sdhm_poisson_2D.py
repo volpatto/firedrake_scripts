@@ -14,7 +14,7 @@ def print(content_to_print):
 PETSc.Log.begin()
 
 # Defining the mesh
-N = 20
+N = 10
 use_quads = True
 mesh = UnitSquareMesh(N, N, quadrilateral=use_quads)
 comm = mesh.comm
@@ -71,9 +71,9 @@ beta = beta_0 / h
 
 # Stabilization parameters
 delta_0 = Constant(-1)
-delta_1 = Constant(-0.5) * h * h
-delta_2 = Constant(0.5) * h * h
-delta_3 = Constant(0.5) * h * h
+delta_1 = Constant(-0.5)  #* h * h
+delta_2 = Constant(0.5)  #* h * h
+delta_3 = Constant(0.5)  #* h * h
 
 # Mixed classical terms
 a = (dot(u, v) - div(v) * p + delta_0 * q * div(u)) * dx
@@ -89,7 +89,7 @@ a += beta("+") * (lambda_h("+") - p("+")) * (mu_h("+") - q("+")) * dS
 # Weakly imposed BC
 # a += (p_boundaries * dot(v, n) + mu_h * (dot(u, n) - dot(u_projected, n))) * ds
 # a += (p_boundaries * dot(v, n) - mu_h * dot(u_projected, n)) * ds
-a += (p_boundaries * dot(v, n) - mu_h * dot(u, n)) * ds  # this one looks right
+a += (p_boundaries * dot(v, n) + mu_h * dot(u, n)) * ds  # this one looks right
 a += beta * (lambda_h - p_boundaries) * mu_h * ds
 
 F = a - L
@@ -114,8 +114,8 @@ params = {
     },
 }
 
-problem = NonlinearVariationalProblem(F, solution, bcs=bc_multiplier)
-# problem = NonlinearVariationalProblem(F, solution)
+# problem = NonlinearVariationalProblem(F, solution, bcs=bc_multiplier)
+problem = NonlinearVariationalProblem(F, solution)
 solver = NonlinearVariationalSolver(problem, solver_parameters=params)
 solver.snes.ksp.setConvergenceHistory()
 solver.solve()
