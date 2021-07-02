@@ -1,0 +1,9 @@
+scipy
+betterspy
+wurlitzer
+matplotlib
+numpy
+pandas
+attrs
+rope
+tqdm

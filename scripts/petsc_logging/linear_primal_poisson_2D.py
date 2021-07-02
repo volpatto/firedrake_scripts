@@ -1,26 +1,36 @@
 from firedrake import *
+import matplotlib.pyplot as plt
+from firedrake.petsc import PETSc
+
+
+def print(content_to_print):
+    return PETSc.Sys.Print(content_to_print)
+
+
+parameters["pyop2_options"]["lazy_evaluation"] = False
+PETSc.Log.begin()
 
 # Defining the mesh
-N = 10
-mesh = UnitCubeMesh(N, N, N)
+N = 20
+use_quads = False
+mesh = UnitSquareMesh(N, N, quadrilateral=use_quads)
+comm = mesh.comm
 
 # Function space declaration
 degree = 1  # Polynomial degree of approximation
 V = FunctionSpace(mesh, "CG", degree)
-U = VectorFunctionSpace(mesh, "CG", degree)
 
 # Trial and test functions
 u = TrialFunction(V)
 v = TestFunction(V)
 
 # Mesh coordinates
-x, y, z = SpatialCoordinate(mesh)
+x, y = SpatialCoordinate(mesh)
 
 # Exact solution
-p_exact = sin(2 * pi * x) * sin(2 * pi * y) * sin(2 * pi * z)
+p_exact = sin(2 * pi * x) * sin(2 * pi * y)
 exact_solution = Function(V).interpolate(p_exact)
 exact_solution.rename("Exact pressure", "label")
-exact_velocity = Function(U, name="Exact velocity").project(-grad(p_exact))
 
 # Forcing function
 f_expression = div(-grad(p_exact))
@@ -34,29 +44,22 @@ a = inner(grad(u), grad(v)) * dx
 L = f * v * dx
 
 # Solving the system
-# Use below config to solve with MUMPS
-# solver_parameters = {
-#     "mat_type": "aij",
-#     "ksp_type": "preonly",
-#     "pc_type": "lu",
-#     "pc_factor_mat_solver_type": "mumps",
-#     # "mat_mumps_icntl_11": None
-#     "mat_mumps_icntl_4": "3",
-# }
-# Use below config to solve with GMRES
 solver_parameters = {
+    'ksp_monitor': None,
+    'ksp_view': None,
     'ksp_type': 'gmres',
-    'pc_type': 'bjacobi',
+    'pc_type': 'none',
     'mat_type': 'aij',
-    'ksp_rtol': 1e-3,
     'ksp_max_it': 2000
 }
 u_h = Function(V)
 problem = LinearVariationalProblem(a, L, u_h, bcs=bcs)
 solver = LinearVariationalSolver(problem, solver_parameters=solver_parameters)
+solver.snes.ksp.setConvergenceHistory()
 solver.solve()
 
-# Writing to Paraview file
-outfile = File("output_poisson3D.pvd")
-u_h.rename("Pressure", "label")
-outfile.write(u_h, exact_solution)
+# Plotting solution field
+tripcolor(u_h)
+plt.xlabel("x")
+plt.ylabel("y")
+plt.show()

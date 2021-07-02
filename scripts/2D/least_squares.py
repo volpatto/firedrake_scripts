@@ -11,7 +11,7 @@ Lx, Ly = 1.0, 1.0
 quadrilateral = True
 mesh = RectangleMesh(nx, ny, Lx, Ly, quadrilateral=quadrilateral)
 
-plot(mesh)
+triplot(mesh)
 plt.axis('off')
 
 degree = 1
@@ -43,11 +43,12 @@ sol_exact = Function(V).interpolate(p_exact)
 sol_exact.rename('Exact pressure', 'label')
 sigma_e = Function(U, name='Exact velocity')
 sigma_e.project(-(k / mu) * grad(p_exact))
-plot(sigma_e)
+quiver(sigma_e)
 source_expr = div(-(k / mu) * grad(p_exact))
 f = Function(V).interpolate(source_expr)
-plot(sol_exact)
+tripcolor(sol_exact)
 plt.axis('off')
+plt.show()
 
 # Boundaries: Left (1), Right (2), Bottom(3), Top (4)
 vx = -2 * pi / Lx * cos(2 * pi * x / Lx) * sin(2 * pi * y / Ly)
@@ -90,8 +91,8 @@ u_h.rename('Pressure', 'label')
 output = File('ls_paper.pvd', project_output=True)
 output.write(sigma_h, u_h, sol_exact, sigma_e)
 
-plot(sigma_h)
-plot(u_h)
+quiver(sigma_h)
+tripcolor(u_h)
 plt.axis('off')
 plt.show()
 

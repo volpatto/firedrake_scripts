@@ -1,6 +1,8 @@
 from firedrake import *
+
 try:
     import matplotlib.pyplot as plt
+
     plt.rcParams['contour.corner_mask'] = False
     plt.close('all')
 except:
@@ -13,7 +15,7 @@ len_h_y = 0.5 * Ly / ny
 quadrilateral = True
 mesh = RectangleMesh(nx, ny, Lx, Ly, quadrilateral=quadrilateral)
 
-plot(mesh)
+triplot(mesh)
 plt.axis('off')
 
 degree = 1
@@ -39,6 +41,7 @@ k = Constant(5e-5)
 mu = Constant(1.0)
 rho = Constant(0.0)
 g = Constant((0.0, 0.0))
+
 
 # f = conditional(
 #     (x - 25) * (x - 25) + (y - 50) * (y - 50) <= 100,
@@ -109,8 +112,8 @@ u_h.rename('Pressure', 'label')
 output = File('darcy_mixed_source.pvd', project_output=True)
 output.write(sigma_h, u_h)
 
-plot(sigma_h)
-plot(u_h)
+quiver(sigma_h)
+tripcolor(u_h)
 plt.axis('off')
 plt.show()
 
