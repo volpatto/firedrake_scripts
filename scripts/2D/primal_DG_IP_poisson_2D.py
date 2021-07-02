@@ -57,6 +57,7 @@ a += s * dot(jump(p, n), avg(grad(q))) * dS - dot(avg(grad(p)), jump(q, n)) * dS
 # Edge stabilizing terms
 a += beta("+") * dot(jump(p, n), jump(q, n)) * dS
 # Weak boundary conditions
+a += s * dot(p * n, grad(q)) * ds - dot(grad(p), q * n) * ds
 a += beta * p * q * ds
 L += beta * exact_solution * q * ds
 

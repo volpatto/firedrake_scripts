@@ -773,6 +773,7 @@ def solve_poisson_sipg(mesh, degree=1):
     # Edge stabilizing terms
     a += beta("+") * dot(jump(p, n), jump(q, n)) * dS
     # Weak boundary conditions
+    a += s * dot(p * n, grad(q)) * ds - dot(grad(p), q * n) * ds
     a += beta * p * q * ds
 
     A = assemble(a, mat_type="aij")
