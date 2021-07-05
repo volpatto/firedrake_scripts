@@ -27,21 +27,15 @@ x, y = SpatialCoordinate(mesh)
 # Exact solution
 p_exact = sin(2 * pi * x) * sin(2 * pi * y)
 exact_solution = Function(V).interpolate(p_exact)
+exact_velocity = -grad(p_exact)
 exact_solution.rename("Exact pressure", "label")
 
 # Forcing function
-f_expression = div(-grad(p_exact))
+f_expression = div(exact_velocity)
 f = Function(V).interpolate(f_expression)
 
-# Boundaries: Left (1), Right (2), Bottom(3), Top (4)
-vx = -2 * pi * cos(2 * pi * x) * sin(2 * pi * y)
-vy = -2 * pi * sin(2 * pi * x) * cos(2 * pi * y)
-
-bc1 = DirichletBC(W[0], as_vector([vx, 0.0]), 1)
-bc2 = DirichletBC(W[0], as_vector([vx, 0.0]), 2)
-bc3 = DirichletBC(W[0], as_vector([0.0, vy]), 3)
-bc4 = DirichletBC(W[0], as_vector([0.0, vy]), 4)
-bcs = [bc1, bc2, bc3, bc4]
+# Boundary Conditions
+bcs = DirichletBC(W[0], exact_velocity, "on_boundary")
 
 # Least-squares terms
 a = inner(u + grad(p), v + grad(q)) * dx
