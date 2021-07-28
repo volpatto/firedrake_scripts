@@ -76,12 +76,13 @@ beta = beta_0 / h
 # delta_3 = Constant(1)
 # delta_4 = Constant(1)
 # delta_5 = Constant(1)
-delta_0 = h * h
+delta = Constant(1e0)
+delta_0 = delta
 delta_1 = Constant(0)
-delta_2 = h * h
-delta_3 = h * h
-delta_4 = h * h
-delta_5 = h * h
+delta_2 = delta
+delta_3 = delta
+delta_4 = delta / h
+delta_5 = delta / h
 
 # Numerical flux trace
 u_hat = u + beta * (p - lambda_h) * n
@@ -113,19 +114,27 @@ a += delta_3 * inner(curl(u), curl(v)) * dx
 
 # Hybridization terms
 a += mu_h("+") * jump(u_hat, n=n) * dS
+# a += mu_h * dot(u_hat, n) * ds
+# L += mu_h * dot(sigma_e, n) * ds
 # These terms related to primal variable tracer are optional
-a += avg(delta_4) * (p("+") - lambda_h("+")) * (q("+") - mu_h("+")) * dS
+a += delta_4("+") * (p("+") - lambda_h("+")) * (q("+") - mu_h("+")) * dS
 a += delta_4 * (p - lambda_h) * (q - mu_h) * ds
 # These terms related to numerical fluxes are required to solve the problem properly
 ## This first term (internal edges) can be removed without problems
-# a += avg(delta_5) * (dot(u, n)("+") - dot(u_hat, n)("+")) * (dot(v, n)("+") - dot(v_hat, n)("+")) * dS
+# a += delta_5("+") * (dot(u, n)("+") - dot(u_hat, n)("+")) * (dot(v, n)("+") - dot(v_hat, n)("+")) * dS
 # a += delta_5 * (dot(u, n) - dot(u_hat, n)) * (dot(v, n) - dot(v_hat, n)) * ds
+
+# Alternative
+# a += delta_4("+") * (lambda_h("+") - p("+")) * (mu_h("+") - q("+")) * dS
+# a += delta_4 * (lambda_h - p) * (mu_h - q) * ds
+# a += delta_5("+") * (dot(u_hat, n)("+") - dot(u, n)("+")) * (dot(v_hat, n)("+") - dot(v, n)("+")) * dS
+# a += delta_5 * (dot(u_hat, n) - dot(sigma_e, n)) * (dot(v_hat, n) - dot(v, n)) * ds
 
 # Weakly imposed BC from hybridization
 # a += mu_h * (lambda_h - p_boundaries) * ds
 # ###
 # a += (
-#     (mu_h - q) * (lambda_h - p_boundaries) * ds
+#     delta_4 * (mu_h - q) * (lambda_h - p_exact) * ds
 # )  # maybe this is not a good way to impose BC, but this necessary
 # L += delta_1 * p_exact * dot(v, n) * ds  # study if this is a good BC imposition
 
@@ -145,12 +154,8 @@ params = {
     "pc_sc_eliminate_fields": "0, 1",
     "condensed_field": {
         "ksp_type": "preonly",
-        # 'ksp_view': None,
         "pc_type": "lu",
-        "ksp_monitor": None,
-        "pc_factor_mat_solver_type": "mumps",
-        # "mat_mumps_icntl_4": "2",
-        "ksp_monitor_true_residual": None
+        "pc_factor_mat_solver_type": "mumps"
     },
 }
 # params = {
