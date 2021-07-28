@@ -267,14 +267,87 @@ def calculate_condition_number(
     return condition_number
 
 
-def calculate_exact_solution(mesh, pressure_family, velocity_family, pressure_degree, velocity_degree):
-    U = VectorFunctionSpace(mesh, velocity_family, velocity_degree)
+def norm_trace(v, norm_type="L2", mesh=None):
+    r"""Compute the norm of ``v``.
+
+    :arg v: a ufl expression (:class:`~.ufl.classes.Expr`) to compute the norm of
+    :arg norm_type: the type of norm to compute, see below for
+         options.
+    :arg mesh: an optional mesh on which to compute the norm
+         (currently ignored).
+
+    Available norm types are:
+
+    - Lp :math:`||v||_{L^p} = (\int |v|^p)^{\frac{1}{p}} \mathrm{d}s`
+    - H1 :math:`||v||_{H^1}^2 = \int (v, v) + (\nabla v, \nabla v) \mathrm{d}s`
+    - Hdiv :math:`||v||_{H_\mathrm{div}}^2 = \int (v, v) + (\nabla\cdot v, \nabla \cdot v) \mathrm{d}s`
+    - Hcurl :math:`||v||_{H_\mathrm{curl}}^2 = \int (v, v) + (\nabla \wedge v, \nabla \wedge v) \mathrm{d}s`
+
+    """
+    typ = norm_type.lower()
+    p = 2
+    if typ == 'l2':
+        expr = inner(v, v)
+    elif typ.startswith('l'):
+        try:
+            p = int(typ[1:])
+            if p < 1:
+                raise ValueError
+        except ValueError:
+            raise ValueError("Don't know how to interpret %s-norm" % norm_type)
+        expr = inner(v, v)
+    elif typ == 'h1':
+        expr = inner(v, v) + inner(grad(v), grad(v))
+    elif typ == "hdiv":
+        expr = inner(v, v) + div(v)*div(v)
+    elif typ == "hcurl":
+        expr = inner(v, v) + inner(curl(v), curl(v))
+    else:
+        raise RuntimeError("Unknown norm type '%s'" % norm_type)
+
+    return assemble((expr("+")**(p/2))*dS)**(1/p) + assemble((expr**(p/2))*ds)**(1/p)
+
+
+def errornorm_trace(u, uh, norm_type="L2", degree_rise=None, mesh=None):
+    """Compute the error :math:`e = u - u_h` in the specified norm.
+
+    :arg u: a :class:`.Function` or UFL expression containing an "exact" solution
+    :arg uh: a :class:`.Function` containing the approximate solution
+    :arg norm_type: the type of norm to compute, see :func:`.norm` for
+         details of supported norm types.
+    :arg degree_rise: ignored.
+    :arg mesh: an optional mesh on which to compute the error norm
+         (currently ignored).
+    """
+    urank = len(u.ufl_shape)
+    uhrank = len(uh.ufl_shape)
+
+    if urank != uhrank:
+        raise RuntimeError("Mismatching rank between u and uh")
+
+    if not isinstance(uh, function.Function):
+        raise ValueError("uh should be a Function, is a %r", type(uh))
+
+    if isinstance(u, function.Function):
+        degree_u = u.function_space().ufl_element().degree()
+        degree_uh = uh.function_space().ufl_element().degree()
+        if degree_uh > degree_u:
+            warning("Degree of exact solution less than approximation degree")
+
+    return norm_trace(u - uh, norm_type=norm_type, mesh=mesh)
+
+
+def calculate_exact_solution(mesh, pressure_family, velocity_family, pressure_degree, velocity_degree, is_hdiv_space=False):
+    if is_hdiv_space:
+        U = FunctionSpace(mesh, velocity_family, velocity_degree)
+    else:
+        U = VectorFunctionSpace(mesh, velocity_family, velocity_degree)
     V = FunctionSpace(mesh, pressure_family, pressure_degree)
 
     x, y = SpatialCoordinate(mesh)
 
     p_exact = sin(2 * pi * x) * sin(2 * pi * y)
-    exact_solution = Function(V).interpolate(p_exact)
+    exact_solution = Function(V).project(p_exact)
     exact_solution.rename("Exact pressure", "label")
     exact_velocity = Function(U, name='Exact velocity')
     exact_velocity.project(-grad(p_exact))
@@ -299,7 +372,10 @@ def calculate_exact_solution_with_trace(mesh, pressure_family, velocity_family, 
 
 def solve_poisson_cg(mesh, degree=1, use_quads=False):
     # Function space declaration
-    V = FunctionSpace(mesh, "CG", degree)
+    pressure_family = 'CG'
+    velocity_family = 'CG'
+    U = VectorFunctionSpace(mesh, velocity_family, degree)
+    V = FunctionSpace(mesh, pressure_family, degree)
 
     # Trial and test functions
     u = TrialFunction(V)
@@ -308,32 +384,51 @@ def solve_poisson_cg(mesh, degree=1, use_quads=False):
     # Dirichlet BCs
     bcs = DirichletBC(V, 0.0, "on_boundary")
 
-    # Variational form
-    a = inner(grad(u), grad(v)) * dx
-
-    A = assemble(a, bcs=bcs, mat_type="aij")
-    petsc_mat = A.M.handle
-    is_symmetric = petsc_mat.isSymmetric(tol=1e-8)
-    size = petsc_mat.getSize()
-    Mnp = csr_matrix(petsc_mat.getValuesCSR()[::-1], shape=size)
-    Mnp.eliminate_zeros()
-    nnz = Mnp.nnz
-    number_of_dofs = V.dim()
-
-    num_of_factors = int(number_of_dofs) - 1
-    condition_number = calculate_condition_number(petsc_mat, num_of_factors)
-
-    result = ConditionNumberResult(
-        form=a,
-        assembled_form=A,
-        condition_number=condition_number,
-        sparse_operator=Mnp,
-        number_of_dofs=number_of_dofs,
-        nnz=nnz,
-        is_operator_symmetric=is_symmetric
+    # Exact solution
+    exact_solution, sigma_e = calculate_exact_solution(
+        mesh, 
+        "DG" if use_quads else "DQ", 
+        "DG" if use_quads else "DQ", 
+        degree + 3, 
+        degree + 3
     )
 
-    return result
+    # Forcing function
+    f = div(-grad(exact_solution))
+
+    # Variational form
+    a = inner(grad(u), grad(v)) * dx
+    L = f * v * dx
+
+    # Solving the problem
+    solver_parameters = {
+        "mat_type": "aij",
+        "ksp_type": "preonly",
+        "pc_type": "lu",
+        "pc_factor_mat_solver_type": "mumps",
+    }
+    solution = Function(V)
+    problem = LinearVariationalProblem(a, L, solution, bcs=bcs, constant_jacobian=False)
+    solver = LinearVariationalSolver(problem, solver_parameters=solver_parameters)
+    solver.solve()
+
+    # Retrieving the solution
+    p_h = solution
+    sigma_h = project(-grad(p_h), U)
+
+    # Calculating L2-error for primal variable
+    p_error_L2 = errornorm(exact_solution, p_h, norm_type="L2")
+
+    # Calculating H1-error for primal variable
+    p_error_H1 = errornorm(exact_solution, p_h, norm_type="H1")
+
+    # Calculating L2-error for flux variable
+    sigma_error_L2 = errornorm(sigma_e, sigma_h, norm_type="L2")
+
+    # Calculating Hdiv-error for flux variable
+    sigma_error_Hdiv = errornorm(sigma_e, sigma_h, norm_type="Hdiv")
+
+    return p_error_L2, p_error_H1, sigma_error_L2, sigma_error_Hdiv
 
 
 def solve_poisson_ls(mesh, degree=1):
@@ -563,8 +658,8 @@ def solve_poisson_mixed_RT(mesh, degree=1):
         hdiv_family = 'RT'
         pressure_family = 'DG'
 
-    U = FunctionSpace(mesh, hdiv_family, degree + 1)
-    V = FunctionSpace(mesh, pressure_family, degree)
+    U = FunctionSpace(mesh, hdiv_family, degree)
+    V = FunctionSpace(mesh, pressure_family, degree - 1)
     W = U * V
 
     # Trial and test functions
@@ -572,43 +667,56 @@ def solve_poisson_mixed_RT(mesh, degree=1):
     v, q = TestFunctions(W)
 
     # Mesh entities
-    x, y = SpatialCoordinate(mesh)
+    n = FacetNormal(mesh)
 
     # Exact solution
-    p_exact = sin(2 * pi * x) * sin(2 * pi * y)
-    exact_solution = Function(V).interpolate(p_exact)
-    exact_solution.rename("Exact pressure", "label")
-    sigma_e = Function(U, name='Exact velocity')
-    sigma_e.project(-grad(p_exact))
+    exact_solution, sigma_e = calculate_exact_solution(
+        mesh, 
+        pressure_family, 
+        hdiv_family, 
+        degree + 3, 
+        degree + 3,
+        is_hdiv_space=True
+    )
+
+    # Forcing function
+    f = div(-grad(exact_solution))
 
     # Dirichlet BCs
-    bcs = DirichletBC(W[0], sigma_e, "on_boundary")
+    # bcs = DirichletBC(W[0], sigma_e, "on_boundary")
 
     # Mixed classical terms
     a = (dot(u, v) - div(v) * p + q * div(u)) * dx
+    L = f * q * dx - dot(v, n) * exact_solution * ds
 
-    A = assemble(a, bcs=bcs, mat_type="aij")
-    petsc_mat = A.M.handle
-    is_symmetric = petsc_mat.isSymmetric(tol=1e-8)
-    size = petsc_mat.getSize()
-    Mnp = csr_matrix(petsc_mat.getValuesCSR()[::-1], shape=size)
-    Mnp.eliminate_zeros()
-    nnz = Mnp.nnz
-    number_of_dofs = W.dim()
+    # Solving the problem
+    solver_parameters = {
+        "mat_type": "aij",
+        "ksp_type": "preonly",
+        "pc_type": "lu",
+        "pc_factor_mat_solver_type": "mumps",
+    }
+    solution = Function(W)
+    problem = LinearVariationalProblem(a, L, solution, bcs=[], constant_jacobian=False)
+    solver = LinearVariationalSolver(problem, solver_parameters=solver_parameters)
+    solver.solve()
 
-    num_of_factors = int(number_of_dofs) - 1
-    condition_number = calculate_condition_number(petsc_mat, num_of_factors)
+    # Retrieving the solution
+    sigma_h, p_h = solution.split()
 
-    result = ConditionNumberResult(
-        form=a,
-        assembled_form=A,
-        condition_number=condition_number,
-        sparse_operator=Mnp,
-        number_of_dofs=number_of_dofs,
-        nnz=nnz,
-        is_operator_symmetric=is_symmetric
-    )
-    return result
+    # Calculating L2-error for primal variable
+    p_error_L2 = errornorm(exact_solution, p_h, norm_type="L2")
+
+    # Calculating H1-error for primal variable
+    p_error_H1 = errornorm(exact_solution, p_h, norm_type="H1")
+
+    # Calculating L2-error for flux variable
+    sigma_error_L2 = errornorm(sigma_e, sigma_h, norm_type="L2")
+
+    # Calculating Hdiv-error for flux variable
+    sigma_error_Hdiv = errornorm(sigma_e, sigma_h, norm_type="Hdiv")
+
+    return p_error_L2, p_error_H1, sigma_error_L2, sigma_error_Hdiv
 
 
 def solve_poisson_dgls(mesh, degree=1):
@@ -974,9 +1082,9 @@ def solve_poisson_sdhm(
     W = U * V * T
 
     # Trial and test functions
-    # solution = Function(W)
-    # u, p, lambda_h = split(solution)
-    u, p, lambda_h = TrialFunctions(W)
+    solution = Function(W)
+    u, p, lambda_h = split(solution)
+    # u, p, lambda_h = TrialFunctions(W)
     v, q, mu_h  = TestFunctions(W)
 
     # Mesh entities
@@ -985,31 +1093,32 @@ def solve_poisson_sdhm(
     x, y = SpatialCoordinate(mesh)
 
     # Exact solution
-    p_exact = sin(2 * pi * x) * sin(2 * pi * y)
-    exact_solution = Function(V).interpolate(p_exact)
-    exact_solution.rename("Exact pressure", "label")
-    sigma_e = Function(U, name='Exact velocity')
-    sigma_e.project(-grad(p_exact))
+    exact_solution, sigma_e, exact_trace = calculate_exact_solution_with_trace(
+        mesh, 
+        pressure_family, 
+        velocity_family, 
+        degree + 3, 
+        degree + 3
+    )
 
     # Forcing function
-    f_expression = div(-grad(p_exact))
-    f = Function(V).interpolate(f_expression)
+    f = div(-grad(exact_solution))
 
     # BCs
     u_projected = sigma_e
-    p_boundaries = p_exact
-    bcs = DirichletBC(W.sub(2), p_exact, "on_boundary")
+    p_boundaries = exact_solution
+    bcs = DirichletBC(W.sub(2), exact_trace, "on_boundary")
 
     # Hybridization parameter
-    beta_0 = Constant(1.0e-18)
-    # beta = beta_0 / h
-    beta = beta_0
+    beta_0 = Constant(1.0e0)
+    beta = beta_0 / h
+    # beta = beta_0
 
     # Stabilization parameters
     delta_0 = Constant(-1)
-    delta_1 = Constant(-0.5) * h * h
-    delta_2 = Constant(0.5) * h * h
-    delta_3 = Constant(0.5) * h * h
+    delta_1 = Constant(-0.5)  #* h * h
+    delta_2 = Constant(0.5)  #* h * h
+    delta_3 = Constant(0.5)  #* h * h
 
     # Mixed classical terms
     a = (dot(u, v) - div(v) * p + delta_0 * q * div(u)) * dx
@@ -1027,35 +1136,47 @@ def solve_poisson_sdhm(
     a += beta * (lambda_h - p_boundaries) * mu_h * ds
 
     F = a - L
-    a_form = lhs(F)
 
-    _A = Tensor(a_form)
-    A = _A.blocks
-    S = A[2, 2] - A[2, :2] * A[:2, :2].inv * A[:2, 2]
-    Smat = assemble(S, bcs=bcs)
-    petsc_mat = Smat.M.handle
+    params = {
+        "snes_type": "ksponly",
+        "mat_type": "matfree",
+        "pmat_type": "matfree",
+        "ksp_type": "preonly",
+        "pc_type": "python",
+        # Use the static condensation PC for hybridized problems
+        # and use a direct solve on the reduced system for lambda_h
+        "pc_python_type": "firedrake.SCPC",
+        "pc_sc_eliminate_fields": "0, 1",
+        "condensed_field": {
+            "ksp_type": "preonly",
+            "pc_type": "lu",
+            "pc_factor_mat_solver_type": "mumps"
+        },
+    }
+    problem = NonlinearVariationalProblem(F, solution, bcs=bcs)
+    solver = NonlinearVariationalSolver(problem, solver_parameters=params)
+    solver.solve()
 
-    is_symmetric = petsc_mat.isSymmetric(tol=1e-8)
-    size = petsc_mat.getSize()
-    Mnp = csr_matrix(petsc_mat.getValuesCSR()[::-1], shape=size)
-    Mnp.eliminate_zeros()
-    nnz = Mnp.nnz
-    number_of_dofs = Mnp.shape[0]
+    # Retrieving the solution
+    sigma_h, p_h, lambda_h = solution.split()
+    sigma_h.rename('Velocity', 'label')
+    p_h.rename('Pressure', 'label')
 
-    num_of_factors = int(number_of_dofs) - 1
-    condition_number = calculate_condition_number(petsc_mat, num_of_factors)
+    # Calculating L2-error for primal variable
+    # p_error_L2 = errornorm(exact_solution, p_h, norm_type="L2")
+    # interpolate(exact_trace, T)
+    p_error_L2 = errornorm_trace(interpolate(exact_trace, T), lambda_h, norm_type="L2")
 
-    result = ConditionNumberResult(
-        form=a,
-        assembled_form=Smat,
-        condition_number=condition_number,
-        sparse_operator=Mnp,
-        number_of_dofs=number_of_dofs,
-        nnz=nnz,
-        is_operator_symmetric=is_symmetric,
-        bcs=bcs
-    )
-    return result
+    # Calculating H1-error for primal variable
+    p_error_H1 = errornorm(exact_solution, p_h, norm_type="H1")
+
+    # Calculating L2-error for flux variable
+    sigma_error_L2 = errornorm(sigma_e, sigma_h, norm_type="L2")
+
+    # Calculating Hdiv-error for flux variable
+    sigma_error_Hdiv = errornorm(sigma_e, sigma_h, norm_type="Hdiv")
+
+    return p_error_L2, p_error_H1, sigma_error_L2, sigma_error_Hdiv
 
 
 def solve_poisson_hdg(
@@ -1151,6 +1272,7 @@ def solve_poisson_hdg(
 
     # Calculating L2-error for primal variable
     p_error_L2 = errornorm(exact_solution, p_h, norm_type="L2")
+    # p_error_L2 = errornorm_trace(interpolate(exact_trace, T), lambda_h, norm_type="L2")
 
     # Calculating H1-error for primal variable
     p_error_H1 = errornorm(exact_solution, p_h, norm_type="H1")
@@ -1408,37 +1530,44 @@ def solve_poisson_lsh(
     # delta_3 = Constant(1)
     # delta_4 = Constant(1)
     # delta_5 = Constant(1)
-    # delta = h
-    delta = Constant(1)
+    delta = h * h
+    # delta = Constant(1)
+    LARGE_NUMBER = Constant(1e0)
     # delta = 1 / h
     delta_0 = delta
     delta_1 = delta
     delta_2 = delta
     delta_3 = delta
-    delta_4 = delta
-    delta_5 = delta
+    delta_4 = delta  #/ h
+    delta_5 = delta  #/ h
+    # delta_5 = LARGE_NUMBER / h
 
     # Numerical flux trace
     u_hat = u + beta * (p - lambda_h) * n
     v_hat = v + beta * (q - mu_h) * n
 
     # Flux least-squares
-    a = (
-        (inner(u, v) - q * div(u) - p * div(v) + inner(grad(p), grad(q)))
-        * delta_1
-        * dx
-    )
-    # These terms below are unsymmetric
-    a += delta_1("+") * jump(u_hat, n=n) * q("+") * dS
-    a += delta_1 * dot(u_hat, n) * q * ds
-    # a += delta_1 * dot(u, n) * q * ds
-    # L = -delta_1 * dot(u_projected, n) * q * ds
-    a += delta_1("+") * lambda_h("+") * jump(v, n=n) * dS
-    a += delta_1 * lambda_h * dot(v, n) * ds
-    # L = -delta_1 * p_boundaries * dot(v, n) * ds
+    # a = (
+    #     (inner(u, v) - q * div(u) - p * div(v) + inner(grad(p), grad(q)))
+    #     * delta_1
+    #     * dx
+    # )
+    # # These terms below are unsymmetric
+    # a += delta_1("+") * jump(u_hat, n=n) * q("+") * dS
+    # a += delta_1 * dot(u_hat, n) * q * ds
+    # # a += delta_1 * dot(u, n) * q * ds
+    # # L = -delta_1 * dot(u_projected, n) * q * ds
+    # a += delta_1("+") * lambda_h("+") * jump(v, n=n) * dS
+    # a += delta_1 * lambda_h * dot(v, n) * ds
+    # L = delta_1 * exact_solution * dot(v, n) * ds
 
     # Flux Least-squares as in DG
-    # a = delta_0 * inner(u + grad(p), v + grad(q)) * dx
+    a = delta_0 * inner(u + grad(p), v + grad(q)) * dx
+
+    # Classical mixed Darcy eq. first-order terms as stabilizing terms
+    a += delta_1 * (dot(u, v) - div(v) * p) * dx
+    a += delta_1("+") * lambda_h("+") * jump(v, n=n) * dS
+    a += delta_1 * lambda_h * dot(v, n) * ds
 
     # Mass balance least-square
     a += delta_2 * div(u) * div(v) * dx
@@ -1451,20 +1580,29 @@ def solve_poisson_lsh(
     a += mu_h("+") * jump(u_hat, n=n) * dS
     # a += mu_h * dot(u_hat, n) * ds
     # L += mu_h * dot(sigma_e, n) * ds
-    # a += avg(delta_4) * (p("+") - lambda_h("+")) * (q("+") - mu_h("+")) * dS
-    # a += avg(delta_4) * (lambda_h("+") - p("+")) * (mu_h("+") - q("+")) * dS
-    # a += delta_4 * (exact_trace - lambda_h) * (q - mu_h) * ds
-    # a += avg(delta_5) * (dot(u, n)("+") - dot(u_hat, n)("+")) * (dot(v, n)("+") - dot(v_hat, n)("+")) * dS
-    # a += delta_5 * (dot(u, n) - dot(u_hat, n)) * (dot(v, n) - dot(v_hat, n)) * ds
+    a += delta_4("+") * (p("+") - lambda_h("+")) * (q("+") - mu_h("+")) * dS
+    # a += delta_4 * (exact_solution - lambda_h) * (q - mu_h) * ds
+    # Alternative primal
+    # a += delta_4("+") * (lambda_h("+") - p("+")) * (mu_h("+") - q("+")) * dS
+    # a += delta_4 * (lambda_h - p) * (mu_h - q) * ds
+    # Flux
+    a += delta_5("+") * (dot(u, n)("+") - dot(u_hat, n)("+")) * (dot(v, n)("+") - dot(v_hat, n)("+")) * dS
+    a += delta_5 * (dot(u, n) - dot(u_hat, n)) * (dot(v, n) - dot(v_hat, n)) * ds
+    # Alternative
+    # a += delta_5("+") * (dot(u_hat, n)("+") - dot(u, n)("+")) * (dot(v_hat, n)("+") - dot(v, n)("+")) * dS
+    # a += delta_5 * (dot(u_hat, n) - dot(u, n)) * (dot(v_hat, n) - dot(v, n)) * ds
 
     # Weakly imposed BC from hybridization
     # a += mu_h * (lambda_h - exact_trace) * ds
     # a += mu_h * lambda_h * ds
     # ###
-    a += (
-        (mu_h - q) * (lambda_h - exact_solution) * ds
-    )  # maybe this is not a good way to impose BC, but this necessary
-    L += delta_1 * exact_solution * dot(v, n) * ds  # study if this is a good BC imposition
+    # a += (
+    #     delta_4 * (mu_h - q) * (lambda_h - exact_solution) * ds
+    # )  # maybe this is not a good way to impose BC, but this necessary
+    # a += (
+    #     delta_4 * (q - mu_h) * (exact_solution - lambda_h) * ds
+    # )  # maybe this is not a good way to impose BC, but this necessary
+    # L += delta_1 * exact_solution * dot(v, n) * ds  # study if this is a good BC imposition
 
     F = a - L
 
@@ -1484,8 +1622,8 @@ def solve_poisson_lsh(
             "pc_factor_mat_solver_type": "mumps",
         },
     }
-    # problem = NonlinearVariationalProblem(F, solution, bcs=bcs)
-    problem = NonlinearVariationalProblem(F, solution)
+    problem = NonlinearVariationalProblem(F, solution, bcs=bcs)
+    # problem = NonlinearVariationalProblem(F, solution)
     solver = NonlinearVariationalSolver(problem, solver_parameters=params)
     solver.solve()
 
@@ -1615,16 +1753,16 @@ def compute_convergence_hp(
 # Solver options
 available_solvers = {
     # "cg": solve_poisson_cg,
-    # "cgls": solve_poisson_cgls,
+    # "cgls": solve_poisson_cgls,  # Compare
     # "dgls": solve_poisson_dgls,
-    # "sdhm": solve_poisson_sdhm,
-    # "ls": solve_poisson_ls,
+    # "sdhm": solve_poisson_sdhm,  # Compare
+    # "ls": solve_poisson_ls,  # Compare
     # "dls": solve_poisson_dls,
-    "lsh": solve_poisson_lsh,
-    # "vms": solve_poisson_vms,
-    # "dvms": solve_poisson_dvms,
-    # "mixed_RT": solve_poisson_mixed_RT,
-    # "hdg": solve_poisson_hdg,
+    # "lsh": solve_poisson_lsh,  # Compare
+    # "vms": solve_poisson_vms,  # Compare
+    # "dvms": solve_poisson_dvms,  # Compare
+    "mixed_RT": solve_poisson_mixed_RT,  # Compare
+    # "hdg": solve_poisson_hdg,  # Compare
     # "cgh": solve_poisson_cgh,
     # "ldgc": solve_poisson_ldgc,
     # "sipg": solve_poisson_sipg,
@@ -1634,7 +1772,9 @@ degree = 1
 last_degree = 4
 # mesh_quad = [False, True]  # Triangles, Quads
 mesh_quad = [True]
-elements_for_each_direction = [15, 20, 25, 30, 35, 40]
+# elements_for_each_direction = [15, 20, 25, 30, 35, 40]
+# elements_for_each_direction = [4, 8, 16, 32, 64, 128]
+elements_for_each_direction = [4, 6, 8, 10, 12, 14]
 for element in mesh_quad:
     for current_solver in available_solvers:
 
