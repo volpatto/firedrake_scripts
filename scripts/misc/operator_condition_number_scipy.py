@@ -1324,13 +1324,16 @@ def solve_poisson_lsh(
     # delta_3 = Constant(1)
     # delta_4 = Constant(1)
     # delta_5 = Constant(1)
+    # LARGE_NUMBER = Constant(1e0)
     delta = h * h
+    # delta = Constant(1)
     # delta = h
     delta_0 = delta
     delta_1 = delta
     delta_2 = delta
     delta_3 = delta
     delta_4 = delta
+    # delta_4 = LARGE_NUMBER / h
     delta_5 = delta
 
     # Numerical flux trace
@@ -1345,15 +1348,20 @@ def solve_poisson_lsh(
     # )
     # # These terms below are unsymmetric
     # a += delta_1 * jump(u_hat, n=n) * q("+") * dS
-    # a += delta_1 * dot(u_hat, n) * q * ds
+    # a += delta_1("+") * dot(u_hat, n) * q * ds
     # # a += delta_1 * dot(u, n) * q * ds
     # # L = -delta_1 * dot(u_projected, n) * q * ds
-    # a += delta_1 * lambda_h("+") * jump(v, n=n) * dS
+    # a += delta_1("+") * lambda_h("+") * jump(v, n=n) * dS
     # a += delta_1 * lambda_h * dot(v, n) * ds
-    # # L = -delta_1 * p_boundaries * dot(v, n) * ds
+    # # L = delta_1 * p_exact * dot(v, n) * ds
 
     # Flux Least-squares as in DG
     a = delta_0 * inner(u + grad(p), v + grad(q)) * dx
+
+    # Classical mixed Darcy eq. first-order terms as stabilizing terms
+    a += delta_1 * (dot(u, v) - div(v) * p) * dx
+    a += delta_1("+") * lambda_h("+") * jump(v, n=n) * dS
+    a += delta_1 * lambda_h * dot(v, n) * ds
 
     # Mass balance least-square
     a += delta_2 * div(u) * div(v) * dx
@@ -1364,8 +1372,8 @@ def solve_poisson_lsh(
 
     # Hybridization terms
     a += mu_h("+") * jump(u_hat, n=n) * dS
-    a += delta_4 * (p("+") - lambda_h("+")) * (q("+") - mu_h("+")) * dS
-    a += delta_4 * (p - lambda_h) * (q - mu_h) * ds
+    a += delta_4("+") * (p("+") - lambda_h("+")) * (q("+") - mu_h("+")) * dS
+    # a += delta_4 * (p - lambda_h) * (q - mu_h) * ds
     # a += delta_5 * (dot(u, n)("+") - dot(u_hat, n)("+")) * (dot(v, n)("+") - dot(v_hat, n)("+")) * dS
     # a += delta_5 * (dot(u, n) - dot(u_hat, n)) * (dot(v, n) - dot(v_hat, n)) * ds
 
@@ -1453,20 +1461,20 @@ def hp_refinement_cond_number_calculation(
 
 # Solver options
 solvers_options = {
-    "cg": solve_poisson_cg,
-    "cgls": solve_poisson_cgls,
-    "dgls": solve_poisson_dgls,
-    "sdhm": solve_poisson_sdhm,
-    "ls": solve_poisson_ls,
-    "dls": solve_poisson_dls,
+    # "cg": solve_poisson_cg,
+    # "cgls": solve_poisson_cgls,
+    # "dgls": solve_poisson_dgls,
+    # "sdhm": solve_poisson_sdhm,
+    # "ls": solve_poisson_ls,
+    # "dls": solve_poisson_dls,
     "lsh": solve_poisson_lsh,
-    "vms": solve_poisson_vms,
-    "dvms": solve_poisson_dvms,
-    "mixed_RT": solve_poisson_mixed_RT,
-    "hdg": solve_poisson_hdg,
-    "cgh": solve_poisson_cgh,
-    "ldgc": solve_poisson_ldgc,
-    "sipg": solve_poisson_sipg,
+    # "vms": solve_poisson_vms,
+    # "dvms": solve_poisson_dvms,
+    # "mixed_RT": solve_poisson_mixed_RT,
+    # "hdg": solve_poisson_hdg,
+    # "cgh": solve_poisson_cgh,
+    # "ldgc": solve_poisson_ldgc,
+    # "sipg": solve_poisson_sipg,
 }
 
 degree = 1
@@ -1490,7 +1498,7 @@ for current_solver in solvers_options:
 
 # N = 5
 # mesh = UnitSquareMesh(N, N, quadrilateral=True)
-# result = solve_poisson_dgls(mesh, degree=1)
+# result = solve_poisson_lsh(mesh, degree=1)
 
 # print(f'Is symmetric? {result.is_operator_symmetric}')
 # print(f'nnz: {result.nnz}')
@@ -1504,8 +1512,8 @@ for current_solver in solvers_options:
 # my_cmap.set_bad(color="lightgray")
 # # plot_matrix_primal_hybrid_full(result.form, result.bcs, cmap=my_cmap)
 # # plot_matrix_mixed_hybrid_full(result.form, result.bcs, cmap=my_cmap)
-# # plot_matrix_hybrid_multiplier(result.form, trace_index=2, bcs=result.bcs, cmap=my_cmap)
-# plot_matrix(result.assembled_form, cmap=my_cmap)
+# plot_matrix_hybrid_multiplier(result.form, trace_index=2, bcs=result.bcs, cmap=my_cmap)
+# # plot_matrix(result.assembled_form, cmap=my_cmap)
 # # plot_matrix_mixed(result.assembled_form, cmap=my_cmap)
 # plt.tight_layout()
 # plt.savefig("sparse_pattern.png")
