@@ -15,12 +15,12 @@ PETSc.Log.begin()
 
 # Defining the mesh
 N = 10
-use_quads = True
+use_quads = False
 mesh = UnitSquareMesh(N, N, quadrilateral=use_quads)
 comm = mesh.comm
 
 # Function space declaration
-is_multiplier_continuous = True
+is_multiplier_continuous = False
 pressure_family = 'DQ' if use_quads else 'DG'
 velocity_family = 'DQ' if use_quads else 'DG'
 degree = 1
@@ -65,16 +65,23 @@ p_boundaries = Constant(0.0)
 u_projected = sigma_e
 
 # Hybridization parameter
-beta_0 = Constant(1.0)
+beta_0 = Constant(1.0e0)
+beta_1 = Constant(1.0e0)
 beta = beta_0 / h
 
 # Stabilizing parameter
-delta_1 = Constant(1)
-delta_2 = Constant(1)
-delta_3 = Constant(1)
+delta = Constant(1)
+# delta = h * h
+delta_0 = delta
+delta_1 = delta
+delta_2 = delta
+delta_3 = delta
+delta_4 = beta_1 / h
+delta_5 = beta_1  #/ h
 
 # Numerical flux trace
 u_hat = u + beta * (p - lambda_h) * n
+v_hat = v + beta * (q - mu_h) * n
 
 # Flux least-squares
 a = (
@@ -82,13 +89,16 @@ a = (
     * delta_1
     * dx
 )
-a += delta_1 * jump(u_hat, n=n) * q("+") * dS
+a += delta_1("+") * jump(u_hat, n=n) * q("+") * dS
 a += delta_1 * dot(u_hat, n) * q * ds
 # a += delta_1 * dot(u, n) * q * ds
 # L = -delta_1 * dot(u_projected, n) * q * ds
-a += delta_1 * lambda_h("+") * jump(v, n=n) * dS
+a += delta_1("+") * lambda_h("+") * jump(v, n=n) * dS
 a += delta_1 * lambda_h * dot(v, n) * ds
-# L = -delta_1 * p_boundaries * dot(v, n) * ds
+L = delta_1 * p_exact * dot(v, n) * ds
+
+# Flux Least-squares as in DG
+# a = delta_0 * inner(u + grad(p), v + grad(q)) * dx
 
 # Mass balance least-square
 a += delta_2 * div(u) * div(v) * dx
@@ -99,12 +109,25 @@ a += delta_3 * inner(curl(u), curl(v)) * dx
 
 # Hybridization terms
 a += mu_h("+") * jump(u_hat, n=n) * dS
+# a += mu_h * dot(u_hat, n) * ds
+# L += mu_h * dot(sigma_e, n) * ds
+# a += jump(u_hat, n=n) * jump(v_hat, n=n) * dS
+# a += dot(u_hat, n) * dot(v_hat, n) * ds
+# L += dot(sigma_e, n) * dot(v_hat, n) * ds
 
+a += delta_4("+") * (p("+") - lambda_h("+")) * (q("+") - mu_h("+")) * dS
+
+# a += delta_5("+") * (dot(u, n)("+") - dot(u_hat, n)("+")) * (dot(v, n)("+") - dot(v_hat, n)("+")) * dS
+# a += delta_5 * (dot(u, n) - dot(u_hat, n)) * (dot(v, n) - dot(v_hat, n)) * ds
+# 
 # Weakly imposed BC from hybridization
 # a += mu_h * (lambda_h - p_boundaries) * ds
 # ###
 # a += (
-#     (mu_h - q) * (lambda_h - p_boundaries) * ds
+#     delta_4 * (mu_h - q) * (lambda_h - p_exact) * ds
+# )  # maybe this is not a good way to impose BC, but this necessary
+# a += (
+#     delta_4 * (q - mu_h) * (p_exact - lambda_h) * ds
 # )  # maybe this is not a good way to impose BC, but this necessary
 # L += delta_1 * p_exact * dot(v, n) * ds  # study if this is a good BC imposition
 
@@ -132,25 +155,6 @@ params = {
         "ksp_monitor_true_residual": None
     },
 }
-# params = {
-#     "snes_type": "ksponly",
-#     "mat_type": "matfree",
-#     "pmat_type": "matfree",
-#     "ksp_type": "preonly",
-#     "pc_type": "python",
-#     # Use the static condensation PC for hybridized problems
-#     # and use a direct solve on the reduced system for lambda_h
-#     "pc_python_type": "firedrake.SCPC",
-#     "pc_sc_eliminate_fields": "0, 1",
-#     "condensed_field": {
-#         "ksp_type": "preonly",
-#         "pc_type": "svd",
-#         'pc_svd_monitor': None,
-#         'ksp_monitor_singular_value': None,
-#         "pc_factor_mat_solver_type": "mumps",
-#         'mat_type': 'aij'
-#     },
-# }
 
 # problem = NonlinearVariationalProblem(F, solution)
 problem = NonlinearVariationalProblem(F, solution, bcs=bc_multiplier)
