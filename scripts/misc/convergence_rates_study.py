@@ -1741,7 +1741,7 @@ def compute_convergence_hp(
 
         PETSc.Sys.Print("\n--------------------------------------")
 
-    dir_name = f"conv_results_{name}"
+    dir_name = f"./conv_rate_results/conv_results_{name}"
     os.makedirs(dir_name, exist_ok=True)
     df_computed_errors = pd.DataFrame(data=computed_errors_dict)
     path_to_save_results = f"{dir_name}/errors.csv"
