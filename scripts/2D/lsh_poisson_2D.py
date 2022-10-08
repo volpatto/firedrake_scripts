@@ -15,7 +15,7 @@ PETSc.Log.begin()
 
 # Defining the mesh
 N = 10
-use_quads = False
+use_quads = True
 mesh = UnitSquareMesh(N, N, quadrilateral=use_quads)
 comm = mesh.comm
 
@@ -70,35 +70,56 @@ beta_1 = Constant(1.0e0)
 beta = beta_0 / h
 
 # Stabilizing parameter
-delta = Constant(1)
-# delta = h * h
+# delta = Constant(1)
+delta = h * h
 delta_0 = delta
-delta_1 = delta
+# delta_1 = delta
+delta_1 = Constant(1)
 delta_2 = delta
-delta_3 = delta
-delta_4 = beta_1 / h
-delta_5 = beta_1  #/ h
+delta_3 = delta * Constant(1)
+# delta_4 = beta_1 / h
+delta_4 = delta * Constant(1)
+# delta_5 = beta_1  #/ h
+delta_5 = delta * Constant(0)
+delta_6 = delta
 
 # Numerical flux trace
 u_hat = u + beta * (p - lambda_h) * n
 v_hat = v + beta * (q - mu_h) * n
 
 # Flux least-squares
-a = (
-    (inner(u, v) - q * div(u) - p * div(v) + inner(grad(p), grad(q)))
-    * delta_1
-    * dx
-)
-a += delta_1("+") * jump(u_hat, n=n) * q("+") * dS
-a += delta_1 * dot(u_hat, n) * q * ds
-# a += delta_1 * dot(u, n) * q * ds
-# L = -delta_1 * dot(u_projected, n) * q * ds
-a += delta_1("+") * lambda_h("+") * jump(v, n=n) * dS
-a += delta_1 * lambda_h * dot(v, n) * ds
-L = delta_1 * p_exact * dot(v, n) * ds
+# a = (
+#     (inner(u, v) - q * div(u) - p * div(v) + inner(grad(p), grad(q)))
+#     * delta_1
+#     * dx
+# )
+# a = (
+#     (inner(u, v) + dot(u, grad(q)) - p * div(v) + inner(grad(p), grad(q)))
+#     * delta_1
+#     * dx
+# )
+# a = (
+#     (inner(u, v) - p * div(v))
+#     * delta_1
+#     * dx
+# )
+# a += -dot(u, grad(q)) * dx + delta_1("+") * jump(u_hat, n=n) * q("+") * dS
+# L = f * q * dx
+# a = (
+#     (inner(u, v) - q * div(u) + dot(v, grad(p)) + inner(grad(p), grad(q)))
+#     * delta_1
+#     * dx
+# )
+# # a += delta_1("+") * jump(u_hat, n=n) * q("+") * dS
+# a += delta_1 * dot(u_hat, n) * q * ds
+# # a += delta_1 * dot(u, n) * q * ds
+# # L = -delta_1 * dot(u_projected, n) * q * ds
+# a += delta_1("+") * lambda_h("+") * jump(v, n=n) * dS
+# a += delta_1 * lambda_h * dot(v, n) * ds
+# L += delta_1 * p_exact * dot(v, n) * ds
 
 # Flux Least-squares as in DG
-# a = delta_0 * inner(u + grad(p), v + grad(q)) * dx
+a = delta_0 * inner(u + grad(p), v + grad(q)) * dx
 
 # Mass balance least-square
 a += delta_2 * div(u) * div(v) * dx
@@ -108,14 +129,17 @@ L = delta_2 * f * div(v) * dx
 a += delta_3 * inner(curl(u), curl(v)) * dx
 
 # Hybridization terms
-a += mu_h("+") * jump(u_hat, n=n) * dS
+# a += mu_h("+") * jump(u_hat, n=n) * dS
+a += mu_h("+") * jump(u, n=n) * dS
+a += mu_h * (lambda_h - p_exact) * ds
 # a += mu_h * dot(u_hat, n) * ds
 # L += mu_h * dot(sigma_e, n) * ds
-# a += jump(u_hat, n=n) * jump(v_hat, n=n) * dS
-# a += dot(u_hat, n) * dot(v_hat, n) * ds
-# L += dot(sigma_e, n) * dot(v_hat, n) * ds
+# a += delta_6("+") * jump(u_hat, n=n) * jump(v_hat, n=n) * dS
+# a += delta_6 * dot(u_hat, n) * dot(v_hat, n) * ds
+# L += delta_6 * dot(sigma_e, n) * dot(v_hat, n) * ds
 
 a += delta_4("+") * (p("+") - lambda_h("+")) * (q("+") - mu_h("+")) * dS
+a += delta_4 * (p - lambda_h) * (q - mu_h) * ds
 
 # a += delta_5("+") * (dot(u, n)("+") - dot(u_hat, n)("+")) * (dot(v, n)("+") - dot(v_hat, n)("+")) * dS
 # a += delta_5 * (dot(u, n) - dot(u_hat, n)) * (dot(v, n) - dot(v_hat, n)) * ds
@@ -156,8 +180,8 @@ params = {
     },
 }
 
-# problem = NonlinearVariationalProblem(F, solution)
-problem = NonlinearVariationalProblem(F, solution, bcs=bc_multiplier)
+problem = NonlinearVariationalProblem(F, solution)
+# problem = NonlinearVariationalProblem(F, solution, bcs=bc_multiplier)
 solver = NonlinearVariationalSolver(problem, solver_parameters=params)
 solver.snes.ksp.setConvergenceHistory()
 solver.solve()

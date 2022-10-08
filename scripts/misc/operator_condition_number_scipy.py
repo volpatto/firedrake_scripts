@@ -3,8 +3,8 @@ from firedrake import *
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib
-from scipy.linalg import svd
-from scipy.sparse.linalg import svds
+from scipy.linalg import svd, eig
+from scipy.sparse.linalg import svds, eigs
 from scipy.sparse import csr_matrix
 from slepc4py import SLEPc
 import pandas as pd
@@ -23,7 +23,41 @@ class ConditionNumberResult(object):
     number_of_dofs = attr.ib()
     nnz = attr.ib()
     is_operator_symmetric = attr.ib()
-    bcs = attr.ib(default=list())    
+    bcs = attr.ib(default=list())
+    assembled_condensed_form = attr.ib(default=None)    
+
+
+def check_symmetric(A: np.ndarray, rtol: float=1e-05, atol: float=1e-08):
+    return np.allclose(A, A.T, rtol=rtol, atol=atol)
+
+
+def check_max_unsymmetric_relative_discrepancy(A):
+    rel_discrepancy = np.linalg.norm(A - A.T, np.inf) / np.linalg.norm(A, np.inf)
+    return rel_discrepancy.max()
+
+
+def assemble_form_to_petsc_matrix(form, bcs=[], mat_type="aij"):
+    assembled_form = assemble(form, bcs=bcs, mat_type=mat_type)
+    petsc_mat = assembled_form.M.handle
+    return petsc_mat
+
+
+def convert_petsc_matrix_to_dense_array(petsc_mat) -> np.ndarray:
+    size = petsc_mat.getSize()
+    matrix_csr = csr_matrix(petsc_mat.getValuesCSR()[::-1], shape=size)
+    matrix_csr.eliminate_zeros()
+    matrix_numpy = matrix_csr.toarray()
+    return matrix_numpy
+
+
+def generate_dense_array_from_form(
+    form, 
+    bcs=[], 
+    mat_type="aij"
+):
+    petsc_mat = assemble_form_to_petsc_matrix(form, bcs=bcs, mat_type=mat_type)
+    numpy_mat = convert_petsc_matrix_to_dense_array(petsc_mat)
+    return numpy_mat
 
 
 def plot_matrix(assembled_form, **kwargs):
@@ -85,11 +119,10 @@ def plot_matrix_mixed(assembled_form, **kwargs):
     return plot
 
 
-def plot_matrix_primal_hybrid_full(a_form, bcs=[], **kwargs):
-    """Provides a plot of a full hybrid-mixed matrix."""
+def plot_matrix_primal_hybrid_full(assembled_form, bcs=[], **kwargs):
+    """Provides a plot of a full hybrid-primal matrix."""
     fig, ax = plt.subplots(1, 1)
 
-    assembled_form = assemble(a_form, bcs=bcs, mat_type="aij")
     petsc_mat = assembled_form.M.handle
 
     f0_size = assembled_form.M[0, 0].handle.getSize()
@@ -156,17 +189,11 @@ def plot_matrix_mixed_hybrid_full(a_form, bcs=[], **kwargs):
     return plot
 
 
-def plot_matrix_hybrid_multiplier(a_form, trace_index=2, bcs=[], **kwargs):
+def plot_matrix_hybrid_multiplier(assembled_form, trace_index=2, bcs=[], **kwargs):
     """Provides a plot of a condensed hybrid-mixed matrix for single scale problems."""
     fig, ax = plt.subplots(1, 1)
 
-    _A = Tensor(a_form)
-    A = _A.blocks
-    idx = trace_index
-    S = A[idx, idx] - A[idx, :idx] * A[:idx, :idx].inv * A[:idx, idx]
-    Smat = assemble(S, bcs=bcs)
-
-    petsc_mat = Smat.M.handle
+    petsc_mat = assembled_form.M.handle
     size = petsc_mat.getSize()
     Mnp = csr_matrix(petsc_mat.getValuesCSR()[::-1], shape=size)
     Mnp.eliminate_zeros()
@@ -189,6 +216,24 @@ def plot_matrix_hybrid_multiplier(a_form, trace_index=2, bcs=[], **kwargs):
     ax.set_yticklabels([])
 
     return plot
+
+
+def calculate_matrix_symmetric_part(dense_numpy_matrix: np.ndarray) -> np.ndarray:
+    A = dense_numpy_matrix
+    A_T = A.T
+    sym_A = (1. / 2.) * (A + A_T)
+    return sym_A
+
+
+def calculate_numpy_matrix_all_eigenvalues(numpy_matrix: np.ndarray, is_sparse: bool=False):
+    if is_sparse:
+        sparse_mat = csr_matrix(numpy_matrix)
+        sparse_mat.eliminate_zeros()
+        num_dofs = sparse_mat.shape[0]
+        eigenvalues = eigs(sparse_mat, k=num_dofs - 1, return_eigenvectors=False)
+    else:
+        eigenvalues = eig(numpy_matrix, right=False)
+    return eigenvalues
 
 
 def filter_real_part_in_array(array: np.ndarray, imag_threshold: float = 1e-5) -> np.ndarray:
@@ -934,7 +979,7 @@ def solve_poisson_sdhm(
     # BCs
     u_projected = sigma_e
     p_boundaries = p_exact
-    bcs = DirichletBC(W.sub(2), p_exact, "on_boundary")
+    bcs = DirichletBC(T, p_exact, "on_boundary")
 
     # Hybridization parameter
     beta_0 = Constant(1.0e-18)
@@ -1037,7 +1082,8 @@ def solve_poisson_hdg(
     f = Function(V).interpolate(f_expression)
 
     # Dirichlet BCs
-    bc_multiplier = DirichletBC(W.sub(2), p_exact, "on_boundary")
+    # bc_multiplier = DirichletBC(W.sub(2), p_exact, "on_boundary")
+    bc_multiplier = DirichletBC(T, p_exact, "on_boundary")
 
     # Hybridization parameter
     beta_0 = Constant(1.0e0)
@@ -1128,7 +1174,8 @@ def solve_poisson_cgh(
     f = Function(V).interpolate(f_expression)
 
     # Dirichlet BCs
-    bc_multiplier = DirichletBC(W.sub(1), p_exact, "on_boundary")
+    # bc_multiplier = DirichletBC(W.sub(1), p_exact, "on_boundary")
+    bc_multiplier = []
 
     # Hybridization parameter
     beta_0 = Constant(1.0e0)
@@ -1179,10 +1226,140 @@ def solve_poisson_cgh(
     return result
 
 
+def solve_poisson_primal_lsh(
+    mesh, 
+    degree=1, 
+    is_multiplier_continuous=False
+):
+    # Function space declaration
+    use_quads = str(mesh.ufl_cell()) == "quadrilateral"
+    pressure_family = 'DQ' if use_quads else 'DG'
+    trace_family = "HDiv Trace"
+    V = FunctionSpace(mesh, pressure_family, degree)
+    if is_multiplier_continuous:
+        LagrangeElement = FiniteElement("Lagrange", mesh.ufl_cell(), degree)
+        C0TraceElement = LagrangeElement["facet"]
+        T = FunctionSpace(mesh, C0TraceElement)
+    else:
+        T = FunctionSpace(mesh, trace_family, degree)
+    W = V * T
+
+    # Trial and test functions
+    # solution = Function(W)
+    # u, p, lambda_h = split(solution)
+    p, lambda_h = TrialFunctions(W)
+    q, mu_h  = TestFunctions(W)
+
+    # Mesh entities
+    n = FacetNormal(mesh)
+    h = CellDiameter(mesh)
+    x, y = SpatialCoordinate(mesh)
+
+    # Exact solution
+    p_exact = sin(2 * pi * x) * sin(2 * pi * y)
+    exact_solution = Function(V).interpolate(p_exact)
+    exact_solution.rename("Exact pressure", "label")
+
+    # Forcing function
+    f_expression = div(-grad(p_exact))
+    f = Function(V).interpolate(f_expression)
+
+    # Dirichlet BCs
+    bc_multiplier = DirichletBC(T, p_exact, "on_boundary")
+    bcs = DirichletBC(W.sub(1), p_exact, "on_boundary")
+    # bc_multiplier = []
+
+    # Hybridization parameter
+    beta_0 = Constant(0 * degree)  # should not be zero when used with LS terms
+    beta = beta_0 / h
+    # beta = beta_0
+
+    # Stabilizing parameter
+    delta_base = h * h
+    # delta_base = Constant(1)
+    delta_0 = Constant(1)
+    delta_1 = delta_base * Constant(1)
+    # delta_2 = delta_base * Constant(1) / h
+    # delta_2 = delta_1 * Constant(0)  # so far this is the best combination
+    delta_2 = Constant(8 * degree * degree) / h
+
+    # Flux variables
+    u = -grad(p)
+    v = -grad(q)
+
+    # Symmetry parameter: s = 1 (symmetric) or s = -1 (unsymmetric)
+    s = Constant(1)
+
+    # Numerical flux trace
+    u_hat = u + beta * (p - lambda_h) * n
+
+    # Classical term
+    a = delta_0 * dot(grad(p), grad(q)) * dx + delta_0('+') * jump(u_hat, n) * q("+") * dS
+    # a += delta_0 * dot(u_hat, n) * q * ds
+    a += delta_0 * dot(u, n) * q * ds + delta_0 * beta * p * q * ds  # expand u_hat product in ds
+    L = delta_0 * f * q * dx
+    L += delta_0 * beta * exact_solution * q * ds
+
+    # Mass balance least-square
+    a += delta_1 * div(u) * div(v) * dx
+    # a += delta_1 * inner(curl(u), curl(v)) * dx
+    L += delta_1 * f * div(v) * dx
+
+    # Hybridization terms
+    a += -mu_h("+") * jump(u_hat, n=n) * dS
+    a += mu_h * lambda_h * ds
+
+    # Least-Squares on constrains
+    a += delta_2("+") * (p("+") - lambda_h("+")) * (q("+") - mu_h("+")) * dS
+    # a += delta_2 * p * (q - mu_h) * ds  # needed if not included as strong BC
+    a += delta_2 * p * q * ds  # needed if not included as strong BC
+    L += delta_2 * exact_solution * q * ds  # needed if not included as strong BC
+    a += delta_2 * lambda_h * mu_h * ds  # needed if not included as strong BC
+    L += delta_2 * p_exact * mu_h * ds  # needed if not included as strong BC
+
+    # Consistent symmetrization
+    a += s * delta_0 * jump(v, n) * (p('+') - lambda_h("+")) * dS
+    a += s * delta_0 * dot(v, n) * (p - exact_solution) * ds
+
+    F = a - L
+    a_form = lhs(F)
+
+    Amat = assemble(a_form, bcs=bcs, mat_type="aij")
+
+    _A = Tensor(a_form)
+    A = _A.blocks
+    S = A[1, 1] - A[1, :1] * A[:1, :1].inv * A[:1, 1]
+    Smat = assemble(S, bcs=bc_multiplier)
+    petsc_mat = Smat.M.handle
+
+    is_symmetric = petsc_mat.isSymmetric(tol=1e-8)
+    size = petsc_mat.getSize()
+    Mnp = csr_matrix(petsc_mat.getValuesCSR()[::-1], shape=size)
+    Mnp.eliminate_zeros()
+    nnz = Mnp.nnz
+    number_of_dofs = Mnp.shape[0]
+
+    num_of_factors = int(number_of_dofs) - 1
+    condition_number = calculate_condition_number(petsc_mat, num_of_factors)
+
+    result = ConditionNumberResult(
+        form=a,
+        assembled_form=Amat,
+        condition_number=condition_number,
+        sparse_operator=Mnp,
+        number_of_dofs=number_of_dofs,
+        nnz=nnz,
+        is_operator_symmetric=is_symmetric,
+        bcs=bc_multiplier,
+        assembled_condensed_form=Smat
+    )
+    return result
+
+
 def solve_poisson_ldgc(
     mesh, 
     degree=1, 
-    is_multiplier_continuous=True
+    is_multiplier_continuous=False
 ):
     # Function space declaration
     use_quads = str(mesh.ufl_cell()) == "quadrilateral"
@@ -1219,32 +1396,44 @@ def solve_poisson_ldgc(
 
     # Dirichlet BCs
     p_boundaries = Constant(0.0)
-    bc_multiplier = DirichletBC(W.sub(1), p_exact, "on_boundary")
+    bcs = DirichletBC(W.sub(1), p_exact, "on_boundary")
 
     # Hybridization parameter
-    s = Constant(-1.0)
-    beta = Constant(32.0)
-    h = CellDiameter(mesh)
-    h_avg = avg(h)
+    beta = Constant(8.0 * degree * degree) / h
 
-    # Classical term
-    a = dot(grad(p), grad(q)) * dx
+    # Numerical flux trace
+    u = -grad(p)
+    u_hat = u + beta * (p - lambda_h) * n
+
+    # Symmetry parameter: s = -1 (symmetric), s = 1 (unsymmetric), and s = 0 (no-symmetrization)
+    s = Constant(-1)
+
+    # Classical Galerkin form
+    a = -dot(u, grad(q)) * dx + jump(u_hat, n) * q("+") * dS
+    # a = div(u) * q * dx
     L = f * q * dx
-    # Hybridization terms
-    a += s * dot(grad(q), n)("+") * (p("+") - lambda_h("+")) * dS
-    a += -dot(grad(p), n)("+") * (q("+") - mu_h("+")) * dS
-    a += (beta / h_avg) * (p("+") - lambda_h("+")) * (q("+") - mu_h("+")) * dS
-    # Boundary terms
-    # a += -dot(vel_projected, n) * v * ds  # How to set this bc??
-    # a += (beta / h) * (p- p_boundaries) * q * ds  # is this necessary?
-    L += s * dot(grad(q), n) * p_boundaries * ds
+    # Transmission condition
+    a += -jump(u_hat, n) * mu_h("+") * dS
+    # Symmetrization
+    a += s * jump(grad(q), n) * (p('+') - lambda_h("+")) * dS
+    # a += s * dot(grad(q), n) * (p - lambda_h) * ds
+    a += s * dot(grad(q), n) * p * ds
+    # Weakly imposed BC
+    # a += dot(u_hat, n) * q * ds
+    # a += dot(u, n) * q * ds	+ beta * (p - lambda_h) * q * ds  # expand u_hat product in ds
+    a += dot(u, n) * q * ds	+ beta * p * q * ds  # expand u_hat product in ds
+    # a += mu_h * (lambda_h - p) * ds
 
     F = a - L
     a_form = lhs(F)
 
+    Amat = assemble(a_form, bcs=bcs, mat_type="aij")
+
     _A = Tensor(a_form)
     A = _A.blocks
     S = A[1, 1] - A[1, :1] * A[:1, :1].inv * A[:1, 1]
+    Srow, _ = S.arg_function_spaces
+    bc_multiplier = DirichletBC(Srow, p_exact, "on_boundary")
     Smat = assemble(S, bcs=bc_multiplier)
     petsc_mat = Smat.M.handle
 
@@ -1260,7 +1449,8 @@ def solve_poisson_ldgc(
 
     result = ConditionNumberResult(
         form=a,
-        assembled_form=Smat,
+        assembled_form=Amat,
+        assembled_condensed_form=Smat,
         condition_number=condition_number,
         sparse_operator=Mnp,
         number_of_dofs=number_of_dofs,
@@ -1329,12 +1519,157 @@ def solve_poisson_lsh(
     # delta = Constant(1)
     # delta = h
     delta_0 = delta
-    delta_1 = delta
+    delta_1 = Constant(1) * delta
     delta_2 = delta
     delta_3 = delta
     delta_4 = delta
     # delta_4 = LARGE_NUMBER / h
-    delta_5 = delta
+    delta_5 = delta * Constant(0)
+
+    # Numerical flux trace
+    u_hat = u + beta * (p - lambda_h) * n
+    v_hat = v + beta * (q - mu_h) * n
+
+    # Flux least-squares
+    a = (
+        (inner(u, v) - q * div(u) - p * div(v) + inner(grad(p), grad(q)))
+        * delta_1
+        * dx
+    )
+    # These terms below are unsymmetric
+    a += delta_1("+") * jump(u_hat, n=n) * q("+") * dS
+    a += delta_1 * dot(u_hat, n) * q * ds
+    # a += delta_1 * dot(u, n) * q * ds
+    # L = -delta_1 * dot(u_projected, n) * q * ds
+    a += delta_1("+") * lambda_h("+") * jump(v, n=n) * dS
+    a += delta_1 * lambda_h * dot(v, n) * ds
+    # L = delta_1 * p_exact * dot(v, n) * ds
+
+    # Flux Least-squares as in DG
+    # a = delta_0 * inner(u + grad(p), v + grad(q)) * dx
+
+    # Classical mixed Darcy eq. first-order terms as stabilizing terms
+    # a += delta_1 * (dot(u, v) - div(v) * p) * dx
+    # a += delta_1("+") * lambda_h("+") * jump(v, n=n) * dS
+    # a += delta_1 * lambda_h * dot(v, n) * ds
+
+    # Mass balance least-square
+    a += delta_2 * div(u) * div(v) * dx
+    # L = delta_2 * f * div(v) * dx
+
+    # Irrotational least-squares
+    a += delta_3 * inner(curl(u), curl(v)) * dx
+
+    # Hybridization terms
+    a += mu_h("+") * jump(u_hat, n=n) * dS
+    a += delta_4("+") * (p("+") - lambda_h("+")) * (q("+") - mu_h("+")) * dS
+    a += delta_4 * (p - lambda_h) * (q - mu_h) * ds
+    a += delta_5("+") * (dot(u, n)("+") - dot(u_hat, n)("+")) * (dot(v, n)("+") - dot(v_hat, n)("+")) * dS
+    a += delta_5 * (dot(u, n) - dot(u_hat, n)) * (dot(v, n) - dot(v_hat, n)) * ds
+
+    # Weakly imposed BC from hybridization
+    # a += mu_h * (lambda_h - p_boundaries) * ds
+    # a += mu_h * lambda_h * ds
+    # ###
+    # a += (
+    #     delta_4 * (q - mu_h) * (exact_solution - lambda_h) * ds
+    # )  # maybe this is not a good way to impose BC, but this necessary
+
+    a_form = lhs(a)
+
+    _A = Tensor(a_form)
+    A = _A.blocks
+    S = A[2, 2] - A[2, :2] * A[:2, :2].inv * A[:2, 2]
+    Smat = assemble(S, bcs=bcs)
+    petsc_mat = Smat.M.handle
+
+    is_symmetric = petsc_mat.isSymmetric(tol=1e-8)
+    size = petsc_mat.getSize()
+    Mnp = csr_matrix(petsc_mat.getValuesCSR()[::-1], shape=size)
+    Mnp.eliminate_zeros()
+    nnz = Mnp.nnz
+    number_of_dofs = Mnp.shape[0]
+
+    num_of_factors = int(number_of_dofs) - 1
+    condition_number = calculate_condition_number(petsc_mat, num_of_factors)
+
+    result = ConditionNumberResult(
+        form=a,
+        assembled_form=Smat,
+        condition_number=condition_number,
+        sparse_operator=Mnp,
+        number_of_dofs=number_of_dofs,
+        nnz=nnz,
+        is_operator_symmetric=is_symmetric,
+        bcs=bcs
+    )
+    return result
+
+
+def solve_poisson_lsh_alternative(
+    mesh, 
+    degree=1, 
+    is_multiplier_continuous=False
+):
+    # Function space declaration
+    use_quads = str(mesh.ufl_cell()) == "quadrilateral"
+    pressure_family = 'DQ' if use_quads else 'DG'
+    velocity_family = 'DQ' if use_quads else 'DG'
+    U = VectorFunctionSpace(mesh, velocity_family, degree)
+    V = FunctionSpace(mesh, pressure_family, degree)
+    if is_multiplier_continuous:
+        LagrangeElement = FiniteElement("Lagrange", mesh.ufl_cell(), degree)
+        C0TraceElement = LagrangeElement["facet"]
+        T = FunctionSpace(mesh, C0TraceElement)
+    else:
+        trace_family = "HDiv Trace"
+        T = FunctionSpace(mesh, trace_family, degree)
+    W = U * V * T
+
+    # Trial and test functions
+    # solution = Function(W)
+    # u, p, lambda_h = split(solution)
+    u, p, lambda_h = TrialFunctions(W)
+    v, q, mu_h  = TestFunctions(W)
+
+    # Mesh entities
+    n = FacetNormal(mesh)
+    h = CellDiameter(mesh)
+    x, y = SpatialCoordinate(mesh)
+
+    # Exact solution
+    p_exact = sin(2 * pi * x) * sin(2 * pi * y)
+    exact_solution = Function(V).interpolate(p_exact)
+    exact_solution.rename("Exact pressure", "label")
+    sigma_e = Function(U, name='Exact velocity')
+    sigma_e.project(-grad(p_exact))
+
+    # BCs
+    bcs = DirichletBC(T, p_exact, "on_boundary")
+
+    # Hybridization parameter
+    beta_0 = Constant(1.0)
+    beta = beta_0 / h
+    beta_avg = beta_0 / h("+")
+
+    # Stabilizing parameter
+    # delta_0 = Constant(1)
+    # delta_1 = Constant(1)
+    # delta_2 = Constant(1)
+    # delta_3 = Constant(1)
+    # delta_4 = Constant(1)
+    # delta_5 = Constant(1)
+    # LARGE_NUMBER = Constant(1e0)
+    delta = h * h
+    # delta = Constant(1)
+    # delta = h
+    delta_0 = delta
+    delta_1 = Constant(0)  #* delta
+    delta_2 = delta
+    delta_3 = delta
+    delta_4 = delta
+    # delta_4 = LARGE_NUMBER / h
+    delta_5 = delta * Constant(0)
 
     # Numerical flux trace
     u_hat = u + beta * (p - lambda_h) * n
@@ -1374,7 +1709,163 @@ def solve_poisson_lsh(
     a += mu_h("+") * jump(u_hat, n=n) * dS
     a += delta_4("+") * (p("+") - lambda_h("+")) * (q("+") - mu_h("+")) * dS
     # a += delta_4 * (p - lambda_h) * (q - mu_h) * ds
-    # a += delta_5 * (dot(u, n)("+") - dot(u_hat, n)("+")) * (dot(v, n)("+") - dot(v_hat, n)("+")) * dS
+    a += delta_5("+") * (dot(u, n)("+") - dot(u_hat, n)("+")) * (dot(v, n)("+") - dot(v_hat, n)("+")) * dS
+    a += delta_5 * (dot(u, n) - dot(u_hat, n)) * (dot(v, n) - dot(v_hat, n)) * ds
+
+    # Weakly imposed BC from hybridization
+    # a += mu_h * (lambda_h - p_boundaries) * ds
+    # a += mu_h * lambda_h * ds
+    # ###
+    a += (
+        delta_4 * (q - mu_h) * (exact_solution - lambda_h) * ds
+    )  # maybe this is not a good way to impose BC, but this necessary
+
+    a_form = lhs(a)
+
+    _A = Tensor(a_form)
+    A = _A.blocks
+    S = A[2, 2] - A[2, :2] * A[:2, :2].inv * A[:2, 2]
+    Smat = assemble(S, bcs=bcs)
+    petsc_mat = Smat.M.handle
+
+    is_symmetric = petsc_mat.isSymmetric(tol=1e-8)
+    size = petsc_mat.getSize()
+    Mnp = csr_matrix(petsc_mat.getValuesCSR()[::-1], shape=size)
+    Mnp.eliminate_zeros()
+    nnz = Mnp.nnz
+    number_of_dofs = Mnp.shape[0]
+
+    num_of_factors = int(number_of_dofs) - 1
+    condition_number = calculate_condition_number(petsc_mat, num_of_factors)
+
+    result = ConditionNumberResult(
+        form=a,
+        assembled_form=Smat,
+        condition_number=condition_number,
+        sparse_operator=Mnp,
+        number_of_dofs=number_of_dofs,
+        nnz=nnz,
+        is_operator_symmetric=is_symmetric,
+        bcs=bcs
+    )
+    return result
+
+
+def solve_poisson_lsh_sym(
+    mesh, 
+    degree=1, 
+    is_multiplier_continuous=False
+):
+    # Function space declaration
+    use_quads = str(mesh.ufl_cell()) == "quadrilateral"
+    pressure_family = 'DQ' if use_quads else 'DG'
+    velocity_family = 'DQ' if use_quads else 'DG'
+    U = VectorFunctionSpace(mesh, velocity_family, degree)
+    V = FunctionSpace(mesh, pressure_family, degree)
+    if is_multiplier_continuous:
+        LagrangeElement = FiniteElement("Lagrange", mesh.ufl_cell(), degree)
+        C0TraceElement = LagrangeElement["facet"]
+        T = FunctionSpace(mesh, C0TraceElement)
+    else:
+        trace_family = "HDiv Trace"
+        T = FunctionSpace(mesh, trace_family, degree)
+    W = U * V * T
+
+    # Trial and test functions
+    # solution = Function(W)
+    # u, p, lambda_h = split(solution)
+    u, p, lambda_h = TrialFunctions(W)
+    v, q, mu_h  = TestFunctions(W)
+
+    # Mesh entities
+    n = FacetNormal(mesh)
+    h = CellDiameter(mesh)
+    x, y = SpatialCoordinate(mesh)
+
+    # Exact solution
+    p_exact = sin(2 * pi * x) * sin(2 * pi * y)
+    exact_solution = Function(V).interpolate(p_exact)
+    exact_solution.rename("Exact pressure", "label")
+    sigma_e = Function(U, name='Exact velocity')
+    sigma_e.project(-grad(p_exact))
+
+    # BCs
+    bcs = DirichletBC(W.sub(2), p_exact, "on_boundary")
+
+    # Hybridization parameter
+    beta_0 = Constant(1.0)
+    beta = beta_0 / h
+    beta_avg = beta_0 / h("+")
+
+    # Stabilizing parameter
+    # delta_0 = Constant(1)
+    # delta_1 = Constant(1)
+    # delta_2 = Constant(1)
+    # delta_3 = Constant(1)
+    # delta_4 = Constant(1)
+    # delta_5 = Constant(1)
+    # LARGE_NUMBER = Constant(1e0)
+    delta = h * h
+    # delta = Constant(1)
+    # delta = h
+    delta_0 = delta
+    delta_1 = Constant(1)  #* delta
+    delta_2 = delta * Constant(0)
+    delta_3 = delta * Constant(0)
+    delta_4 = delta * Constant(1)
+    # delta_4 = beta
+    # delta_4 = LARGE_NUMBER / h
+    delta_5 = delta
+
+    # Numerical flux trace
+    u_hat = u + beta * (p - lambda_h) * n
+    v_hat = v + beta * (q - mu_h) * n
+
+    # Flux least-squares
+    # a = (
+    #     (inner(u, v) + dot(u, grad(q)) - p * div(v) + inner(grad(p), grad(q)))
+    #     * delta_1
+    #     * dx
+    # )
+    a = (
+        (inner(u, v) - p * div(v))
+        * delta_1
+        * dx
+    )
+    a += -delta_1 * dot(u, grad(q)) * dx + delta_1("+") * jump(u_hat, n=n) * q("+") * dS
+    # These terms below are unsymmetric
+    # a += delta_1("+") * jump(u_hat, n=n) * q("+") * dS
+    a += delta_1 * dot(u_hat, n) * q * ds
+    # a += delta_1 * dot(u, n) * q * ds
+    # L = -delta_1 * dot(u_projected, n) * q * ds
+    a += delta_1("+") * lambda_h("+") * jump(v, n=n) * dS
+    a += delta_1 * lambda_h * dot(v, n) * ds
+    # L = delta_1 * p_exact * dot(v, n) * ds
+
+    # Flux Least-squares as in DG
+    # a = delta_0 * inner(u + grad(p), v + grad(q)) * dx
+
+    # Classical mixed Darcy eq. first-order terms as stabilizing terms
+    # a += delta_1 * (dot(u, v) - div(v) * p) * dx
+    # a += delta_1("+") * lambda_h("+") * jump(v, n=n) * dS
+    # a += delta_1 * lambda_h * dot(v, n) * ds
+
+    # Mass balance least-square
+    a += delta_2 * div(u) * div(v) * dx
+    # L = delta_2 * f * div(v) * dx
+
+    # Irrotational least-squares
+    a += delta_3 * inner(curl(u), curl(v)) * dx
+
+    # Hybridization terms
+    a += mu_h("+") * jump(u_hat, n=n) * dS
+    a += mu_h * lambda_h * ds
+    # a += mu_h * (lambda_h - p_exact) * ds
+    a += delta_4("+") * (p("+") - lambda_h("+")) * (q("+") - mu_h("+")) * dS
+    a += delta_4 * (p - lambda_h) * (q - mu_h) * ds
+    # a += delta_4("+") * (lambda_h("+") - p("+")) * (mu_h("+") - q("+")) * dS
+    # a += delta_4 * (lambda_h - p) * (mu_h - q) * ds
+    # a += delta_5("+") * (dot(u, n)("+") - dot(u_hat, n)("+")) * (dot(v, n)("+") - dot(v_hat, n)("+")) * dS
     # a += delta_5 * (dot(u, n) - dot(u_hat, n)) * (dot(v, n) - dot(v_hat, n)) * ds
 
     # Weakly imposed BC from hybridization
@@ -1382,13 +1873,16 @@ def solve_poisson_lsh(
     # a += mu_h * lambda_h * ds
     # ###
     # a += (
-    #     (mu_h - q) * (lambda_h - p_boundaries) * ds
+    #     delta_4 * (q - mu_h) * (p - lambda_h) * ds
     # )  # maybe this is not a good way to impose BC, but this necessary
 
-    _A = Tensor(a)
+    a_form = lhs(a)
+
+    _A = Tensor(a_form)
     A = _A.blocks
     S = A[2, 2] - A[2, :2] * A[:2, :2].inv * A[:2, 2]
     Smat = assemble(S, bcs=bcs)
+    # Smat = assemble(S, bcs=[])
     petsc_mat = Smat.M.handle
 
     is_symmetric = petsc_mat.isSymmetric(tol=1e-8)
@@ -1418,7 +1912,7 @@ def hp_refinement_cond_number_calculation(
     solver,
     min_degree=1,
     max_degree=4,
-    numel_xy=(5, 10, 15, 20, 25),
+    numel_xy=(4, 6, 8, 10, 12, 14),
     quadrilateral=True,
     name="",
     **kwargs
@@ -1451,9 +1945,10 @@ def hp_refinement_cond_number_calculation(
             results_dict["h"].append(current_cell_size)
             results_dict["Condition Number"].append(result.condition_number)
 
-    os.makedirs("./cond_number_results/results_%s" % name, exist_ok=True)
+    base_name = f"./cond_number_results/results_deg_var_{name}"
+    os.makedirs(f"{base_name}", exist_ok=True)
     df_cond_number = pd.DataFrame(data=results_dict)
-    path_to_save_results = "./cond_number_results/results_%s/cond_numbers.csv" % name
+    path_to_save_results = f"{base_name}/cond_numbers.csv"
     df_cond_number.to_csv(path_to_save_results)
 
     return df_cond_number
@@ -1467,7 +1962,8 @@ solvers_options = {
     # "sdhm": solve_poisson_sdhm,
     # "ls": solve_poisson_ls,
     # "dls": solve_poisson_dls,
-    "lsh": solve_poisson_lsh,
+    # "lsh": solve_poisson_lsh,
+    # "lsh_alternative": solve_poisson_lsh_alternative,
     # "vms": solve_poisson_vms,
     # "dvms": solve_poisson_dvms,
     # "mixed_RT": solve_poisson_mixed_RT,
@@ -1478,7 +1974,9 @@ solvers_options = {
 }
 
 degree = 1
-last_degree = 1
+last_degree = 7
+elements_for_each_direction = [6, 8, 10, 12, 14]
+# elements_for_each_direction = [5]
 for current_solver in solvers_options:
 
     # Setting the output file name
@@ -1492,29 +1990,54 @@ for current_solver in solvers_options:
         solver,
         min_degree=degree,
         max_degree=degree + last_degree,
-        quadrilateral=True,
+        quadrilateral=False,
+        numel_xy=elements_for_each_direction,
         name=name
     )
 
-# N = 5
-# mesh = UnitSquareMesh(N, N, quadrilateral=True)
-# result = solve_poisson_lsh(mesh, degree=1)
+N = 4
+degree = 1
+mesh = UnitSquareMesh(N, N, quadrilateral=False)
+result = solve_poisson_primal_lsh(mesh, degree=degree)
 
-# print(f'Is symmetric? {result.is_operator_symmetric}')
-# print(f'nnz: {result.nnz}')
-# print(f'DoFs: {result.number_of_dofs}')
-# print(f'Condition Number: {result.condition_number}')
+print(f'Is symmetric? {result.is_operator_symmetric}')
+print(f'nnz: {result.nnz}')
+print(f'DoFs: {result.number_of_dofs}')
+print(f'Condition Number: {result.condition_number}')
 
-# # Plotting the resulting matrix
-# matplotlib.use('TkAgg')
-# import copy
-# my_cmap = copy.copy(plt.cm.get_cmap("winter"))
-# my_cmap.set_bad(color="lightgray")
-# # plot_matrix_primal_hybrid_full(result.form, result.bcs, cmap=my_cmap)
-# # plot_matrix_mixed_hybrid_full(result.form, result.bcs, cmap=my_cmap)
-# plot_matrix_hybrid_multiplier(result.form, trace_index=2, bcs=result.bcs, cmap=my_cmap)
-# # plot_matrix(result.assembled_form, cmap=my_cmap)
-# # plot_matrix_mixed(result.assembled_form, cmap=my_cmap)
-# plt.tight_layout()
-# plt.savefig("sparse_pattern.png")
+# Some matrix post-processing
+assembled_form = result.assembled_form
+matrix_form = assembled_form.M.handle
+condensed_numpy_mat = convert_petsc_matrix_to_dense_array(matrix_form)
+# numpy_mat = generate_dense_array_from_form(result.form, bcs=[])
+np.savetxt("form_matrix.csv", condensed_numpy_mat, delimiter=",")
+
+is_full_matrix_symmetric = check_symmetric(condensed_numpy_mat)
+print(f'Is full matrix symmetric? {is_full_matrix_symmetric}')
+
+max_discrepancy = check_max_unsymmetric_relative_discrepancy(condensed_numpy_mat)
+print(f'Max relative discrepancy of full matrix with its transpose: {max_discrepancy}')
+
+symmetric_mat = calculate_matrix_symmetric_part(condensed_numpy_mat)
+operator_eigenvalues = calculate_numpy_matrix_all_eigenvalues(symmetric_mat)
+operator_eigenvalues_real = filter_real_part_in_array(operator_eigenvalues)
+max_eigenvalue = operator_eigenvalues_real.max()
+min_eigenvalue = operator_eigenvalues_real.min()
+print(f'Symmetric part max eigenvalue: {max_eigenvalue}')
+print(f'Symmetric part min eigenvalue: {min_eigenvalue}')
+np.savetxt("matrix_eigenvalues.csv", operator_eigenvalues_real, delimiter=",")
+
+
+# Plotting the resulting matrix
+matplotlib.use('Agg')
+import copy
+my_cmap = copy.copy(plt.cm.get_cmap("winter"))
+my_cmap.set_bad(color="lightgray")
+plot_matrix_primal_hybrid_full(result.assembled_form, result.bcs, cmap=my_cmap)
+# plot_matrix_mixed_hybrid_full(result.form, [], cmap=my_cmap)
+# plot_matrix_hybrid_multiplier(result.assembled_condensed_form, trace_index=1, bcs=result.bcs, cmap=my_cmap)
+# plot_matrix(result.assembled_form, cmap=my_cmap)
+# plot_matrix_mixed(result.assembled_form, cmap=my_cmap)
+plt.tight_layout()
+plt.savefig("sparse_pattern.png")
 # plt.show()

@@ -1,5 +1,6 @@
 import attr
 from firedrake import *
+from firedrake.petsc import PETSc
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib
@@ -361,7 +362,10 @@ def calculate_exact_solution_with_trace(mesh, pressure_family, velocity_family, 
 
     x, y = SpatialCoordinate(mesh)
 
-    p_exact = sin(2 * pi * x) * sin(2 * pi * y)
+    p_exact = sin(2 * pi * x) * sin(2 * pi * y)  # original
+    # p_exact = sin(0.5 * pi * x) * sin(0.5 * pi * y)
+    # p_exact = x * x * x - 3 * x * y * y
+    # p_exact = - (x * x / 2 - x * x * x / 3) * (y * y / 2 - y * y * y / 3)
     exact_solution = Function(V).interpolate(p_exact)
     exact_solution.rename("Exact pressure", "label")
     exact_velocity = Function(U, name='Exact velocity')
@@ -381,20 +385,20 @@ def solve_poisson_cg(mesh, degree=1, use_quads=False):
     u = TrialFunction(V)
     v = TestFunction(V)
 
-    # Dirichlet BCs
-    bcs = DirichletBC(V, 0.0, "on_boundary")
-
     # Exact solution
     exact_solution, sigma_e = calculate_exact_solution(
         mesh, 
-        "DG" if use_quads else "DQ", 
-        "DG" if use_quads else "DQ", 
+        pressure_family, 
+        velocity_family, 
         degree + 3, 
         degree + 3
     )
 
     # Forcing function
     f = div(-grad(exact_solution))
+
+    # Dirichlet BCs
+    bcs = DirichletBC(V, project(exact_solution, V), "on_boundary")
 
     # Variational form
     a = inner(grad(u), grad(v)) * dx
@@ -910,6 +914,8 @@ def solve_poisson_sipg(mesh, degree=1):
     # Function space declaration
     use_quads = str(mesh.ufl_cell()) == "quadrilateral"
     pressure_family = 'DQ' if use_quads else 'DG'
+    velocity_family = 'DQ' if use_quads else 'DG'
+    U = VectorFunctionSpace(mesh, velocity_family, degree)
     V = FunctionSpace(mesh, pressure_family, degree)
 
     # Trial and test functions
@@ -922,16 +928,19 @@ def solve_poisson_sipg(mesh, degree=1):
     x, y = SpatialCoordinate(mesh)
 
     # Exact solution
-    p_exact = sin(2 * pi * x) * sin(2 * pi * y)
-    exact_solution = Function(V).interpolate(p_exact)
-    exact_solution.rename("Exact pressure", "label")
+    exact_solution, sigma_e = calculate_exact_solution(
+        mesh, 
+        pressure_family, 
+        velocity_family, 
+        degree + 3, 
+        degree + 3
+    )
 
     # Forcing function
-    f_expression = div(-grad(p_exact))
-    f = Function(V).interpolate(f_expression)
+    f = div(-grad(exact_solution))
 
     # Edge stabilizing parameter
-    beta0 = Constant(1e1)
+    beta0 = Constant(1e2)
     beta = beta0 / h
 
     # Symmetry term. Choose if the method is SIPG (-1) or NIPG (1)
@@ -943,33 +952,302 @@ def solve_poisson_sipg(mesh, degree=1):
     # DG edge terms
     a += s * dot(jump(p, n), avg(grad(q))) * dS - dot(avg(grad(p)), jump(q, n)) * dS
     # Edge stabilizing terms
-    a += beta("+") * dot(jump(p, n), jump(q, n)) * dS
+    a += avg(beta) * dot(jump(p, n), jump(q, n)) * dS
     # Weak boundary conditions
     a += s * dot(p * n, grad(q)) * ds - dot(grad(p), q * n) * ds
     a += beta * p * q * ds
+    L += beta * exact_solution * q * ds
 
-    A = assemble(a, mat_type="aij")
-    petsc_mat = A.M.handle
-    is_symmetric = petsc_mat.isSymmetric(tol=1e-8)
-    size = petsc_mat.getSize()
-    Mnp = csr_matrix(petsc_mat.getValuesCSR()[::-1], shape=size)
-    Mnp.eliminate_zeros()
-    nnz = Mnp.nnz
-    number_of_dofs = V.dim()
+    # Solving the system
+    solver_parameters = {
+        "mat_type": "aij",
+        "ksp_type": "preonly",
+        "pc_type": "lu",
+        "pc_factor_mat_solver_type": "mumps",
+    }
+    solution = Function(V)
+    problem = LinearVariationalProblem(a, L, solution, bcs=[])
+    solver = LinearVariationalSolver(problem, solver_parameters=solver_parameters)
+    solver.solve()
 
-    num_of_factors = int(number_of_dofs) - 1
-    condition_number = calculate_condition_number(petsc_mat, num_of_factors)
+    # Retrieving the solution
+    p_h = solution
+    sigma_h = project(-grad(p_h), U)
 
-    result = ConditionNumberResult(
-        form=a,
-        assembled_form=A,
-        condition_number=condition_number,
-        sparse_operator=Mnp,
-        number_of_dofs=number_of_dofs,
-        nnz=nnz,
-        is_operator_symmetric=is_symmetric
+    # Calculating L2-error for primal variable
+    p_error_L2 = errornorm(exact_solution, p_h, norm_type="L2")
+
+    # Calculating H1-error for primal variable
+    p_error_H1 = errornorm(exact_solution, p_h, norm_type="H1")
+
+    # Calculating L2-error for flux variable
+    sigma_error_L2 = errornorm(sigma_e, sigma_h, norm_type="L2")
+
+    # Calculating Hdiv-error for flux variable
+    sigma_error_Hdiv = errornorm(sigma_e, sigma_h, norm_type="Hdiv")
+
+    return p_error_L2, p_error_H1, sigma_error_L2, sigma_error_Hdiv
+
+
+def solve_poisson_dls_primal(mesh, degree=1):
+    # Function space declaration
+    use_quads = str(mesh.ufl_cell()) == "quadrilateral"
+    pressure_family = 'DQ' if use_quads else 'DG'
+    velocity_family = 'DQ' if use_quads else 'DG'
+    U = VectorFunctionSpace(mesh, velocity_family, degree)
+    V = FunctionSpace(mesh, pressure_family, degree)
+
+    # Trial and test functions
+    p = TrialFunction(V)
+    q = TestFunction(V)
+
+    # Mesh entities
+    n = FacetNormal(mesh)
+    h = CellDiameter(mesh)
+    x, y = SpatialCoordinate(mesh)
+
+    # Exact solution
+    exact_solution, sigma_e = calculate_exact_solution(
+        mesh, 
+        pressure_family, 
+        velocity_family, 
+        degree + 3, 
+        degree + 3
     )
-    return result
+
+    # Forcing function
+    f = div(-grad(exact_solution))
+
+    # Stabilizing parameter
+    # delta_base = h * h
+    element_size_factor = h
+    penalty_constant = 1e0
+    penalty_constant_ip = 1e2
+    delta_base = Constant(penalty_constant * degree * degree)
+    # delta_base = Constant(penalty_constant)
+    # delta_base = Constant(1e0 * degree * degree)
+    enable_dg_ip = Constant(0)  # enable (1) or disable (0)
+    delta_0 = delta_base / delta_base * enable_dg_ip
+    delta_1 = Constant(1)
+    # delta_1 = h * h
+    # delta_2 = delta_base / h
+    # Testar esses valores, Abimael acha que é ao cubo. Testar combinações
+    # delta_2 = delta_base / h / h / h / h * Constant(1)
+    delta_2 = delta_base / h / h * Constant(1)
+    # delta_2 = delta_base / h * Constant(1)  # DG-IP
+    # delta_3 = 1 / delta_base / h / h
+    # delta_3 = 1 / delta_base * element_size_factor * Constant(1)
+    delta_3 = Constant(1)
+    # delta_3 = Constant(1) * delta_base
+    # delta_3 = delta_2
+    
+    # Stabilizing parameter (for PhD results)
+    # penalty_constant = 1e0
+    # delta_base = Constant(penalty_constant * degree * degree)
+    # enable_dg_ip = Constant(0)  # enable (1) or disable (0)
+    # delta_0 = delta_base / delta_base * enable_dg_ip
+    # delta_1 = Constant(1)
+    # delta_2 = delta_base / h / h * Constant(1)
+    # delta_3 = Constant(1)
+    
+    # Stabilizing parameter (testing)
+    penalty_constant = 1e2
+    penalty_constant_ip = 0e0
+    # delta_base = Constant(penalty_constant * degree * degree)
+    delta_base = Constant(penalty_constant)
+    enable_dg_ip = Constant(0)  # enable (1) or disable (0)
+    delta_0 = delta_base / delta_base * enable_dg_ip
+    delta_1 = Constant(1)
+    delta_2 = delta_base / h / h / h / h * Constant(1) / delta_base
+    delta_3 = Constant(1) / delta_base / h / h * delta_base
+
+    # Flux variables
+    u = -grad(p)
+    v = -grad(q)
+
+    # Residual definition
+    Lp = div(u)
+    Lq = div(v)
+
+    # Classical DG-IP term
+    a = delta_0 * dot(grad(p), grad(q)) * dx
+    L = delta_0 * f * q * dx
+
+    # Symmetry term. Choose if the method is SIPG (-1) or NIPG (1)
+    s = Constant(-1)
+
+    # DG edge terms
+    a += s * delta_0 * dot(jump(p, n), avg(v)) * dS
+    a += -delta_0 * dot(avg(u), jump(q, n)) * dS
+
+    # Mass balance least-square
+    a += delta_1 * Lp * Lq * dx
+    L += delta_1 * f * Lq * dx
+
+    # Hybridization terms
+    a += avg(delta_2) * dot(jump(p, n=n), jump(q, n=n)) * dS
+    a += delta_2 * (p - exact_solution) * q * ds
+    a += avg(delta_3) * jump(u, n=n) * jump(v, n=n) * dS
+    # Flux should not be imposed at Dirichlet condition boundaries
+    # a += delta_3 * dot(u, n) * dot(v, n) * ds
+    # L += delta_3 * dot(sigma_e, n) * dot(v, n) * ds
+
+    # DG-IP Weak boundary conditions (not required, already imposed by LS terms)
+    beta0 = Constant(enable_dg_ip * penalty_constant_ip * degree * degree)
+    beta = beta0 / h  # Nitsche term
+    a += s * delta_0 * dot(p * n, v) * ds - delta_0 * dot(u, q * n) * ds
+    a += delta_0 * beta * p * q * ds
+    L += delta_0 * beta * exact_solution * q * ds
+
+    # Ensuring that the formulation is properly decomposed in LHS and RHS
+    F = a - L
+    a_form = lhs(F)
+    L_form = rhs(F)
+
+    # Solving the system
+    solver_parameters = {
+        "mat_type": "aij",
+        "ksp_type": "preonly",
+        "pc_type": "lu",
+        "pc_factor_mat_solver_type": "mumps",
+    }
+    solution = Function(V)
+    problem = LinearVariationalProblem(a_form, L_form, solution, bcs=[])
+    solver = LinearVariationalSolver(problem, solver_parameters=solver_parameters)
+    solver.solve()
+
+    # Retrieving the solution
+    p_h = solution
+    sigma_h = project(-grad(p_h), U)
+
+    # Calculating L2-error for primal variable
+    p_error_L2 = errornorm(exact_solution, p_h, norm_type="L2")
+
+    # Calculating H1-error for primal variable
+    p_error_H1 = errornorm(exact_solution, p_h, norm_type="H1")
+
+    # Calculating L2-error for flux variable
+    sigma_error_L2 = errornorm(sigma_e, sigma_h, norm_type="L2")
+
+    # Calculating Hdiv-error for flux variable
+    sigma_error_Hdiv = errornorm(sigma_e, sigma_h, norm_type="Hdiv")
+
+    return p_error_L2, p_error_H1, sigma_error_L2, sigma_error_Hdiv
+
+
+def solve_poisson_cls_primal(mesh, degree=1):
+    # Function space declaration
+    use_quads = str(mesh.ufl_cell()) == "quadrilateral"
+    pressure_family = 'CG' if use_quads else 'CG'
+    velocity_family = 'CG' if use_quads else 'CG'
+    U = VectorFunctionSpace(mesh, velocity_family, degree)
+    V = FunctionSpace(mesh, pressure_family, degree)
+
+    # Trial and test functions
+    p = TrialFunction(V)
+    q = TestFunction(V)
+
+    # Mesh entities
+    n = FacetNormal(mesh)
+    h = CellDiameter(mesh)
+    x, y = SpatialCoordinate(mesh)
+
+    # Exact solution
+    exact_solution, sigma_e = calculate_exact_solution(
+        mesh, 
+        pressure_family, 
+        velocity_family, 
+        degree + 3, 
+        degree + 3
+    )
+
+    # Forcing function
+    f = div(-grad(exact_solution))
+    
+    # Stabilizing parameter (for PhD results)
+    element_size_factor = h
+    beta0 = Constant(1e5)
+    beta = beta0 / h
+    penalty_constant = 1e0
+    delta_base = Constant(penalty_constant * degree * degree)
+    enable_dg_ip = Constant(0)  # enable (1) or disable (0)
+    delta_0 = delta_base / delta_base * enable_dg_ip
+    delta_1 = Constant(1)
+    delta_2 = delta_base / h / h * Constant(1)
+    delta_3 = Constant(1) * beta * h
+    # delta_3 = Constant(1e-2)
+
+    # Flux variables
+    u = -grad(p)
+    v = -grad(q)
+
+    # Residual definition
+    Lp = div(u)
+    Lq = div(v)
+
+    # Classical DG-IP term
+    a = delta_0 * dot(grad(p), grad(q)) * dx
+    L = delta_0 * f * q * dx
+
+    # Symmetry term. Choose if the method is SIPG (-1) or NIPG (1)
+    s = Constant(-1)
+
+    # DG edge terms
+    a += s * delta_0 * dot(jump(p, n), avg(v)) * dS
+    a += -delta_0 * dot(avg(u), jump(q, n)) * dS
+
+    # Mass balance least-square
+    a += delta_1 * Lp * Lq * dx
+    L += delta_1 * f * Lq * dx
+
+    # Hybridization terms
+    a += delta_2 * (p - exact_solution) * q * ds
+    a += avg(delta_3) * jump(u, n=n) * jump(v, n=n) * dS
+    # Flux should not be imposed at Dirichlet condition boundaries
+    # a += delta_3 * dot(u, n) * dot(v, n) * ds
+    # L += delta_3 * dot(sigma_e, n) * dot(v, n) * ds
+
+    # DG-IP Weak boundary conditions (not required, already imposed by LS terms)
+    # beta0 = Constant(enable_dg_ip * penalty_constant_ip * degree * degree)
+    # beta = beta0 / h  # Nitsche term
+    # a += s * delta_0 * dot(p * n, v) * ds - delta_0 * dot(u, q * n) * ds
+    # a += delta_0 * beta * p * q * ds
+    # L += delta_0 * beta * exact_solution * q * ds
+
+    # Ensuring that the formulation is properly decomposed in LHS and RHS
+    F = a - L
+    a_form = lhs(F)
+    L_form = rhs(F)
+
+    # Solving the system
+    solver_parameters = {
+        "mat_type": "aij",
+        "ksp_type": "preonly",
+        "pc_type": "lu",
+        "pc_factor_mat_solver_type": "mumps",
+    }
+    solution = Function(V)
+    problem = LinearVariationalProblem(a_form, L_form, solution, bcs=[])
+    solver = LinearVariationalSolver(problem, solver_parameters=solver_parameters)
+    solver.solve()
+
+    # Retrieving the solution
+    p_h = solution
+    sigma_h = project(-grad(p_h), U)
+
+    # Calculating L2-error for primal variable
+    p_error_L2 = errornorm(exact_solution, p_h, norm_type="L2")
+
+    # Calculating H1-error for primal variable
+    p_error_H1 = errornorm(exact_solution, p_h, norm_type="H1")
+
+    # Calculating L2-error for flux variable
+    sigma_error_L2 = errornorm(sigma_e, sigma_h, norm_type="L2")
+
+    # Calculating Hdiv-error for flux variable
+    sigma_error_Hdiv = errornorm(sigma_e, sigma_h, norm_type="Hdiv")
+
+    return p_error_L2, p_error_H1, sigma_error_L2, sigma_error_Hdiv
 
 
 def solve_poisson_dls(mesh, degree=1):
@@ -1110,7 +1388,7 @@ def solve_poisson_sdhm(
     bcs = DirichletBC(W.sub(2), exact_trace, "on_boundary")
 
     # Hybridization parameter
-    beta_0 = Constant(1.0e0)
+    beta_0 = Constant(0.0e0)
     beta = beta_0 / h
     # beta = beta_0
 
@@ -1120,20 +1398,48 @@ def solve_poisson_sdhm(
     delta_2 = Constant(0.5)  #* h * h
     delta_3 = Constant(0.5)  #* h * h
 
-    # Mixed classical terms
-    a = (dot(u, v) - div(v) * p + delta_0 * q * div(u)) * dx
+    # # Mixed classical terms
+    # a = (dot(u, v) - div(v) * p + delta_0 * q * div(u)) * dx
+    # L = delta_0 * f * q * dx
+    # # Stabilizing terms
+    # a += delta_1 * inner(u + grad(p), v + grad(q)) * dx
+    # a += delta_2 * div(u) * div(v) * dx
+    # a += delta_3 * inner(curl(u), curl(v)) * dx
+    # L += delta_2 * f * div(v) * dx
+    # # Hybridization terms
+    # a += lambda_h("+") * dot(v, n)("+") * dS + mu_h("+") * dot(u, n)("+") * dS
+    # a += beta("+") * (lambda_h("+") - p("+")) * (mu_h("+") - q("+")) * dS
+    # # Weakly imposed BC
+    # a += (p_boundaries * dot(v, n) + mu_h * (dot(u, n) - dot(u_projected, n))) * ds
+    # a += beta * (lambda_h - p_boundaries) * mu_h * ds
+
+    # Numerical flux trace
+    u_hat = u + beta * (p - lambda_h) * n
+
+    # HDG classical form
+    a = (dot(u, v) - div(v) * p) * dx + lambda_h("+") * jump(v, n) * dS
+    a += delta_0 * div(u) * q * dx
     L = delta_0 * f * q * dx
-    # Stabilizing terms
+
+    # Least-squares terms
     a += delta_1 * inner(u + grad(p), v + grad(q)) * dx
     a += delta_2 * div(u) * div(v) * dx
     a += delta_3 * inner(curl(u), curl(v)) * dx
     L += delta_2 * f * div(v) * dx
-    # Hybridization terms
-    a += lambda_h("+") * dot(v, n)("+") * dS + mu_h("+") * dot(u, n)("+") * dS
-    a += beta("+") * (lambda_h("+") - p("+")) * (mu_h("+") - q("+")) * dS
+
+    # Transmission condition
+    a += jump(u_hat, n) * mu_h("+") * dS
+
+    # Nitsche's term to transmission condition edge stabilization
+    a += -beta('+') * (p('+') - lambda_h('+')) * q('+') * dS
+
     # Weakly imposed BC
-    a += (p_boundaries * dot(v, n) + mu_h * (dot(u, n) - dot(u_projected, n))) * ds
-    a += beta * (lambda_h - p_boundaries) * mu_h * ds
+    # a += lambda_h * dot(v, n) * ds  # required term
+    L += -exact_solution * dot(v, n) * ds  # required as the above, but just one of them should be used (works for continuous multiplier)
+    a += -beta * p * q * ds  # required term... note that u (the unknown) is used
+    L += -beta * exact_solution * q * ds  # Required, this one is paired with the above term
+    a += lambda_h * mu_h * ds  # Classical required term
+    L += exact_solution * mu_h * ds  # Pair for the above classical required term
 
     F = a - L
 
@@ -1153,7 +1459,8 @@ def solve_poisson_sdhm(
             "pc_factor_mat_solver_type": "mumps"
         },
     }
-    problem = NonlinearVariationalProblem(F, solution, bcs=bcs)
+    # problem = NonlinearVariationalProblem(F, solution, bcs=bcs)
+    problem = NonlinearVariationalProblem(F, solution)
     solver = NonlinearVariationalSolver(problem, solver_parameters=params)
     solver.solve()
 
@@ -1163,9 +1470,9 @@ def solve_poisson_sdhm(
     p_h.rename('Pressure', 'label')
 
     # Calculating L2-error for primal variable
-    # p_error_L2 = errornorm(exact_solution, p_h, norm_type="L2")
+    p_error_L2 = errornorm(exact_solution, p_h, norm_type="L2")
     # interpolate(exact_trace, T)
-    p_error_L2 = errornorm_trace(interpolate(exact_trace, T), lambda_h, norm_type="L2")
+    # p_error_L2 = errornorm_trace(interpolate(exact_trace, T), lambda_h, norm_type="L2")
 
     # Calculating H1-error for primal variable
     p_error_H1 = errornorm(exact_solution, p_h, norm_type="H1")
@@ -1293,8 +1600,10 @@ def solve_poisson_cgh(
 ):
     # Function space declaration
     use_quads = str(mesh.ufl_cell()) == "quadrilateral"
-    pressure_family = 'DQ' if use_quads else 'DG'
     trace_family = "HDiv Trace"
+    pressure_family = 'DQ' if use_quads else 'DG'
+    velocity_family = 'DQ' if use_quads else 'DG'
+    U = VectorFunctionSpace(mesh, velocity_family, degree)
     V = FunctionSpace(mesh, pressure_family, degree)
     if is_multiplier_continuous:
         LagrangeElement = FiniteElement("Lagrange", mesh.ufl_cell(), degree)
@@ -1305,9 +1614,9 @@ def solve_poisson_cgh(
     W = V * T
 
     # Trial and test functions
-    # solution = Function(W)
-    # u, p, lambda_h = split(solution)
-    p, lambda_h = TrialFunctions(W)
+    solution = Function(W)
+    p, lambda_h = split(solution)
+    # u, p, lambda_h = TrialFunctions(W)
     q, mu_h  = TestFunctions(W)
 
     # Mesh entities
@@ -1316,16 +1625,19 @@ def solve_poisson_cgh(
     x, y = SpatialCoordinate(mesh)
 
     # Exact solution
-    p_exact = sin(2 * pi * x) * sin(2 * pi * y)
-    exact_solution = Function(V).interpolate(p_exact)
-    exact_solution.rename("Exact pressure", "label")
+    exact_solution, sigma_e, exact_trace = calculate_exact_solution_with_trace(
+        mesh, 
+        pressure_family, 
+        velocity_family, 
+        degree + 3, 
+        degree + 3
+    )
 
     # Forcing function
-    f_expression = div(-grad(p_exact))
-    f = Function(V).interpolate(f_expression)
+    f = div(-grad(exact_solution))
 
     # Dirichlet BCs
-    bc_multiplier = DirichletBC(W.sub(1), p_exact, "on_boundary")
+    bc_multiplier = DirichletBC(W.sub(1), exact_trace, "on_boundary")
 
     # Hybridization parameter
     beta_0 = Constant(1.0e0)
@@ -1338,42 +1650,62 @@ def solve_poisson_cgh(
 
     # HDG classical form
     a = -dot(u, grad(q)) * dx + jump(u_hat, n) * q("+") * dS
+    # a = div(u) * q * dx
     L = f * q * dx
     # Transmission condition
     a += jump(u_hat, n) * mu_h("+") * dS
     # Weakly imposed BC
     a += dot(u_hat, n) * q * ds
+    a += mu_h * (lambda_h - exact_trace) * ds
+
+    # a += (p("+") - lambda_h("+")) * (q("+") - mu_h("+")) * dS
+    # a += (p - lambda_h) * (q - mu_h) * ds
 
     F = a - L
-    a_form = lhs(F)
 
-    _A = Tensor(a_form)
-    A = _A.blocks
-    S = A[1, 1] - A[1, :1] * A[:1, :1].inv * A[:1, 1]
-    Smat = assemble(S, bcs=bc_multiplier)
-    petsc_mat = Smat.M.handle
+    params = {
+        "snes_type": "ksponly",
+        "mat_type": "matfree",
+        "pmat_type": "matfree",
+        "ksp_type": "preonly",
+        "pc_type": "python",
+        # Use the static condensation PC for hybridized problems
+        # and use a direct solve on the reduced system for lambda_h
+        "pc_python_type": "firedrake.SCPC",
+        "pc_sc_eliminate_fields": "0",
+        "condensed_field": {
+            "ksp_type": "preonly",
+            # 'ksp_view': None,
+            "pc_type": "lu",
+            "pc_factor_mat_solver_type": "mumps",
+            # "mat_mumps_icntl_4": "2",
+        },
+    }
+    # problem = NonlinearVariationalProblem(F, solution, bcs=bcs)
+    problem = NonlinearVariationalProblem(F, solution)
+    solver = NonlinearVariationalSolver(problem, solver_parameters=params)
+    solver.solve()
 
-    is_symmetric = petsc_mat.isSymmetric(tol=1e-8)
-    size = petsc_mat.getSize()
-    Mnp = csr_matrix(petsc_mat.getValuesCSR()[::-1], shape=size)
-    Mnp.eliminate_zeros()
-    nnz = Mnp.nnz
-    number_of_dofs = Mnp.shape[0]
+    # Retrieving the solution
+    p_h, lambda_h = solution.split()
+    sigma_h = Function(U, name='Velocity')
+    sigma_h.project(-grad(p_h))
+    sigma_h.rename('Velocity', 'label')
+    p_h.rename('Pressure', 'label')
 
-    num_of_factors = int(number_of_dofs) - 1
-    condition_number = calculate_condition_number(petsc_mat, num_of_factors)
+    # Calculating L2-error for primal variable
+    p_error_L2 = errornorm(exact_solution, p_h, norm_type="L2")
 
-    result = ConditionNumberResult(
-        form=a,
-        assembled_form=Smat,
-        condition_number=condition_number,
-        sparse_operator=Mnp,
-        number_of_dofs=number_of_dofs,
-        nnz=nnz,
-        is_operator_symmetric=is_symmetric,
-        bcs=bc_multiplier
-    )
-    return result
+    # Calculating H1-error for primal variable
+    p_error_H1 = errornorm(exact_solution, p_h, norm_type="H1")
+
+    # Calculating L2-error for flux variable
+    sigma_error_L2 = errornorm(sigma_e, sigma_h, norm_type="L2")
+
+    # Calculating Hdiv-error for flux variable
+    sigma_error_Hdiv = errornorm(sigma_e, sigma_h, norm_type="Hdiv")
+
+    return p_error_L2, p_error_H1, sigma_error_L2, sigma_error_Hdiv
 
 
 def solve_poisson_ldgc(
@@ -1383,8 +1715,10 @@ def solve_poisson_ldgc(
 ):
     # Function space declaration
     use_quads = str(mesh.ufl_cell()) == "quadrilateral"
-    primal_family = "DQ" if use_quads else "DG"
-    V = FunctionSpace(mesh, primal_family, degree)
+    pressure_family = 'DQ' if use_quads else 'DG'
+    velocity_family = 'DQ' if use_quads else 'DG'
+    U = VectorFunctionSpace(mesh, velocity_family, degree)
+    V = FunctionSpace(mesh, pressure_family, degree)
     if is_multiplier_continuous:
         LagrangeElement = FiniteElement("Lagrange", mesh.ufl_cell(), degree)
         C0TraceElement = LagrangeElement["facet"]
@@ -1395,9 +1729,9 @@ def solve_poisson_ldgc(
     W = V * T
 
     # Trial and test functions
-    # solution = Function(W)
-    # u, p, lambda_h = split(solution)
-    p, lambda_h = TrialFunctions(W)
+    solution = Function(W)
+    p, lambda_h = split(solution)
+    # u, p, lambda_h = TrialFunctions(W)
     q, mu_h  = TestFunctions(W)
 
     # Mesh entities
@@ -1406,66 +1740,89 @@ def solve_poisson_ldgc(
     x, y = SpatialCoordinate(mesh)
 
     # Exact solution
-    p_exact = sin(2 * pi * x) * sin(2 * pi * y)
-    exact_solution = Function(V).interpolate(p_exact)
-    exact_solution.rename("Exact pressure", "label")
+    exact_solution, sigma_e, exact_trace = calculate_exact_solution_with_trace(
+        mesh, 
+        pressure_family, 
+        velocity_family, 
+        degree + 3, 
+        degree + 3
+    )
 
     # Forcing function
-    f_expression = div(-grad(p_exact))
-    f = Function(V).interpolate(f_expression)
+    f = div(-grad(exact_solution))
 
     # Dirichlet BCs
-    p_boundaries = Constant(0.0)
-    bc_multiplier = DirichletBC(W.sub(1), p_exact, "on_boundary")
+    bc_multiplier = DirichletBC(W.sub(1), exact_trace, "on_boundary")
 
     # Hybridization parameter
-    s = Constant(-1.0)
-    beta = Constant(32.0)
-    h = CellDiameter(mesh)
-    h_avg = avg(h)
+    # beta = Constant(6.0) if degree == 1 else Constant(15)
+    beta = Constant(8.0 * degree * degree) / h
 
-    # Classical term
-    a = dot(grad(p), grad(q)) * dx
+    # Numerical flux trace
+    u = -grad(p)
+    u_hat = u + beta * (p - lambda_h) * n
+
+    # Symmetry parameter: s = -1 (symmetric), s = 1 (unsymmetric), and s = 0 (no-symmetrization)
+    s = Constant(-1)
+
+    # Classical Galerkin form
+    a = -dot(u, grad(q)) * dx + jump(u_hat, n) * q("+") * dS
+    # a = div(u) * q * dx
     L = f * q * dx
-    # Hybridization terms
-    a += s * dot(grad(q), n)("+") * (p("+") - lambda_h("+")) * dS
-    a += -dot(grad(p), n)("+") * (q("+") - mu_h("+")) * dS
-    a += (beta / h_avg) * (p("+") - lambda_h("+")) * (q("+") - mu_h("+")) * dS
-    # Boundary terms
-    # a += -dot(vel_projected, n) * v * ds  # How to set this bc??
-    # a += (beta / h) * (p- p_boundaries) * q * ds  # is this necessary?
-    L += s * dot(grad(q), n) * p_boundaries * ds
-
+    # Transmission condition
+    a += -jump(u_hat, n) * mu_h("+") * dS
+    # Symmetrization
+    a += s * jump(grad(q), n) * (p('+') - lambda_h("+")) * dS
+    a += s * dot(grad(q), n) * (p - exact_solution) * ds
+    # Weakly imposed BC
+    # a += dot(u_hat, n) * q * ds
+    a += dot(u, n) * q * ds	+ beta * (p - exact_solution) * q * ds  # expand u_hat product in ds
+    a += mu_h * (lambda_h - exact_solution) * ds
     F = a - L
-    a_form = lhs(F)
 
-    _A = Tensor(a_form)
-    A = _A.blocks
-    S = A[1, 1] - A[1, :1] * A[:1, :1].inv * A[:1, 1]
-    Smat = assemble(S, bcs=bc_multiplier)
-    petsc_mat = Smat.M.handle
+    params = {
+        "snes_type": "ksponly",
+        "mat_type": "matfree",
+        "pmat_type": "matfree",
+        "ksp_type": "preonly",
+        "pc_type": "python",
+        # Use the static condensation PC for hybridized problems
+        # and use a direct solve on the reduced system for lambda_h
+        "pc_python_type": "firedrake.SCPC",
+        "pc_sc_eliminate_fields": "0",
+        "condensed_field": {
+            "ksp_type": "preonly",
+            # 'ksp_view': None,
+            "pc_type": "lu",
+            "pc_factor_mat_solver_type": "mumps",
+            # "mat_mumps_icntl_4": "2",
+        },
+    }
+    # problem = NonlinearVariationalProblem(F, solution, bcs=bc_multiplier)
+    problem = NonlinearVariationalProblem(F, solution)
+    solver = NonlinearVariationalSolver(problem, solver_parameters=params)
+    solver.solve()
 
-    is_symmetric = petsc_mat.isSymmetric(tol=1e-8)
-    size = petsc_mat.getSize()
-    Mnp = csr_matrix(petsc_mat.getValuesCSR()[::-1], shape=size)
-    Mnp.eliminate_zeros()
-    nnz = Mnp.nnz
-    number_of_dofs = Mnp.shape[0]
+    # Retrieving the solution
+    p_h, lambda_h = solution.split()
+    sigma_h = Function(U, name='Velocity')
+    sigma_h.project(-grad(p_h))
+    sigma_h.rename('Velocity', 'label')
+    p_h.rename('Pressure', 'label')
 
-    num_of_factors = int(number_of_dofs) - 1
-    condition_number = calculate_condition_number(petsc_mat, num_of_factors)
+    # Calculating L2-error for primal variable
+    p_error_L2 = errornorm(exact_solution, p_h, norm_type="L2")
 
-    result = ConditionNumberResult(
-        form=a,
-        assembled_form=Smat,
-        condition_number=condition_number,
-        sparse_operator=Mnp,
-        number_of_dofs=number_of_dofs,
-        nnz=nnz,
-        is_operator_symmetric=is_symmetric,
-        bcs=bc_multiplier
-    )
-    return result
+    # Calculating H1-error for primal variable
+    p_error_H1 = errornorm(exact_solution, p_h, norm_type="H1")
+
+    # Calculating L2-error for flux variable
+    sigma_error_L2 = errornorm(sigma_e, sigma_h, norm_type="L2")
+
+    # Calculating Hdiv-error for flux variable
+    sigma_error_Hdiv = errornorm(sigma_e, sigma_h, norm_type="Hdiv")
+
+    return p_error_L2, p_error_H1, sigma_error_L2, sigma_error_Hdiv
 
 
 def solve_poisson_lsh(
@@ -1535,11 +1892,12 @@ def solve_poisson_lsh(
     LARGE_NUMBER = Constant(1e0)
     # delta = 1 / h
     delta_0 = delta
-    delta_1 = delta
+    # delta_1 = delta
+    delta_1 = Constant(1) * delta
     delta_2 = delta
     delta_3 = delta
     delta_4 = delta  #/ h
-    delta_5 = delta  #/ h
+    delta_5 = delta * Constant(0)  #/ h
     # delta_5 = LARGE_NUMBER / h
 
     # Numerical flux trace
@@ -1547,27 +1905,31 @@ def solve_poisson_lsh(
     v_hat = v + beta * (q - mu_h) * n
 
     # Flux least-squares
+    a = (
+        (inner(u, v) - q * div(u) - p * div(v) + inner(grad(p), grad(q)))
+        * delta_1
+        * dx
+    )
     # a = (
-    #     (inner(u, v) - q * div(u) - p * div(v) + inner(grad(p), grad(q)))
+    #     (inner(u, v) - q * div(u) + dot(v, grad(p)) + inner(grad(p), grad(q)))
     #     * delta_1
     #     * dx
     # )
-    # # These terms below are unsymmetric
-    # a += delta_1("+") * jump(u_hat, n=n) * q("+") * dS
-    # a += delta_1 * dot(u_hat, n) * q * ds
-    # # a += delta_1 * dot(u, n) * q * ds
-    # # L = -delta_1 * dot(u_projected, n) * q * ds
-    # a += delta_1("+") * lambda_h("+") * jump(v, n=n) * dS
-    # a += delta_1 * lambda_h * dot(v, n) * ds
-    # L = delta_1 * exact_solution * dot(v, n) * ds
-
-    # Flux Least-squares as in DG
-    a = delta_0 * inner(u + grad(p), v + grad(q)) * dx
-
-    # Classical mixed Darcy eq. first-order terms as stabilizing terms
-    a += delta_1 * (dot(u, v) - div(v) * p) * dx
+    # These terms below are unsymmetric
+    a += delta_1("+") * jump(u_hat, n=n) * q("+") * dS
+    a += delta_1 * dot(u_hat, n) * q * ds
+    # a += delta_1 * dot(u, n) * q * ds
+    # L = -delta_1 * dot(u_projected, n) * q * ds
     a += delta_1("+") * lambda_h("+") * jump(v, n=n) * dS
     a += delta_1 * lambda_h * dot(v, n) * ds
+
+    # Flux Least-squares as in DG
+    # a = delta_0 * inner(u + grad(p), v + grad(q)) * dx
+
+    # Classical mixed Darcy eq. first-order terms as stabilizing terms
+    # a += delta_1 * (dot(u, v) - div(v) * p) * dx
+    # a += delta_1("+") * lambda_h("+") * jump(v, n=n) * dS
+    # a += delta_1 * lambda_h * dot(v, n) * ds
 
     # Mass balance least-square
     a += delta_2 * div(u) * div(v) * dx
@@ -1578,9 +1940,11 @@ def solve_poisson_lsh(
 
     # Hybridization terms
     a += mu_h("+") * jump(u_hat, n=n) * dS
+    a += mu_h * (lambda_h - p_exact) * ds
     # a += mu_h * dot(u_hat, n) * ds
     # L += mu_h * dot(sigma_e, n) * ds
     a += delta_4("+") * (p("+") - lambda_h("+")) * (q("+") - mu_h("+")) * dS
+    a += delta_4 * (p - lambda_h) * (q - mu_h) * ds
     # a += delta_4 * (exact_solution - lambda_h) * (q - mu_h) * ds
     # Alternative primal
     # a += delta_4("+") * (lambda_h("+") - p("+")) * (mu_h("+") - q("+")) * dS
@@ -1602,7 +1966,7 @@ def solve_poisson_lsh(
     # a += (
     #     delta_4 * (q - mu_h) * (exact_solution - lambda_h) * ds
     # )  # maybe this is not a good way to impose BC, but this necessary
-    # L += delta_1 * exact_solution * dot(v, n) * ds  # study if this is a good BC imposition
+    L += delta_1 * exact_solution * dot(v, n) * ds  # study if this is a good BC imposition
 
     F = a - L
 
@@ -1622,13 +1986,648 @@ def solve_poisson_lsh(
             "pc_factor_mat_solver_type": "mumps",
         },
     }
-    problem = NonlinearVariationalProblem(F, solution, bcs=bcs)
-    # problem = NonlinearVariationalProblem(F, solution)
+    # problem = NonlinearVariationalProblem(F, solution, bcs=bcs)
+    problem = NonlinearVariationalProblem(F, solution)
     solver = NonlinearVariationalSolver(problem, solver_parameters=params)
     solver.solve()
 
     # Retrieving the solution
     sigma_h, p_h, lambda_h = solution.split()
+    sigma_h.rename('Velocity', 'label')
+    p_h.rename('Pressure', 'label')
+
+    # Calculating L2-error for primal variable
+    p_error_L2 = errornorm(exact_solution, p_h, norm_type="L2")
+
+    # Calculating H1-error for primal variable
+    p_error_H1 = errornorm(exact_solution, p_h, norm_type="H1")
+
+    # Calculating L2-error for flux variable
+    sigma_error_L2 = errornorm(sigma_e, sigma_h, norm_type="L2")
+
+    # Calculating Hdiv-error for flux variable
+    sigma_error_Hdiv = errornorm(sigma_e, sigma_h, norm_type="Hdiv")
+
+    return p_error_L2, p_error_H1, sigma_error_L2, sigma_error_Hdiv
+
+
+def solve_poisson_lsh_alternative(
+    mesh, 
+    degree=1, 
+    is_multiplier_continuous=False
+):
+    # Function space declaration
+    use_quads = str(mesh.ufl_cell()) == "quadrilateral"
+    pressure_family = 'DQ' if use_quads else 'DG'
+    velocity_family = 'DQ' if use_quads else 'DG'
+    U = VectorFunctionSpace(mesh, velocity_family, degree)
+    V = FunctionSpace(mesh, pressure_family, degree)
+    if is_multiplier_continuous:
+        LagrangeElement = FiniteElement("Lagrange", mesh.ufl_cell(), degree)
+        C0TraceElement = LagrangeElement["facet"]
+        T = FunctionSpace(mesh, C0TraceElement)
+    else:
+        trace_family = "HDiv Trace"
+        T = FunctionSpace(mesh, trace_family, degree)
+    W = U * V * T
+
+    # Trial and test functions
+    solution = Function(W)
+    u, p, lambda_h = split(solution)
+    # u, p, lambda_h = TrialFunctions(W)
+    v, q, mu_h  = TestFunctions(W)
+
+    # Mesh entities
+    n = FacetNormal(mesh)
+    h = CellDiameter(mesh)
+    x, y = SpatialCoordinate(mesh)
+
+    # Exact solution
+    exact_solution, sigma_e, exact_trace = calculate_exact_solution_with_trace(
+        mesh, 
+        pressure_family, 
+        velocity_family, 
+        degree + 3, 
+        degree + 3
+    )
+
+    # Forcing function
+    f = div(-grad(exact_solution))
+
+    # BCs
+    p_exact = exact_trace
+    # bcs = DirichletBC(W.sub(2), exact_trace, "on_boundary")
+    bcs = DirichletBC(W.sub(2), p_exact, "on_boundary")
+
+    # Hybridization parameter
+    beta_0 = Constant(1.0e0)
+    beta = beta_0 / h
+    # beta = beta_0
+    beta_avg = beta_0 / h("+")
+
+    # Stabilizing parameter
+    # delta_0 = Constant(1)
+    # delta_1 = Constant(1)
+    # delta_2 = Constant(1)
+    # delta_3 = Constant(1)
+    # delta_4 = Constant(1)
+    # delta_5 = Constant(1)
+    # delta = h * h
+    delta = Constant(1.0)
+    # delta = 1 / h
+    # delta_0 = delta
+    delta_0 = Constant(1)
+    # delta_1 = delta
+    delta_1 = Constant(0)  #* delta
+    delta_2 = delta
+    delta_3 = delta
+    beta_1 = Constant(0.0e0)
+    delta_4 = beta_1 / h
+    delta_5 = delta * Constant(0)  #/ h
+    # delta_5 = LARGE_NUMBER / h
+
+    # Numerical flux trace
+    u_hat = u + beta * (p - lambda_h) * n
+    v_hat = v + beta * (q - mu_h) * n
+
+    # Flux least-squares
+    # Comments: For this expanded form, when using every parameter as one (note that edge terms in flux contribution should match
+    # with transmission condition weighting), super convergence was achieved for triangles for degree = 1.
+    # It is important to note that, in such a case, beta is not zero, so u_hat edge stabilization should be included.
+    a = (
+        (inner(u, v) - q * div(u) - p * div(v) + inner(grad(p), grad(q)))
+        * delta_0
+        * dx
+    )
+    # These terms below are unsymmetric
+    a += delta_0("+") * jump(u_hat, n=n) * q("+") * dS
+    a += delta_0 * dot(u, n) * q * ds
+    a += delta_0 * beta * (p - lambda_h) * q * ds
+    a += delta_0("+") * lambda_h("+") * jump(v, n=n) * dS
+    a += delta_0 * lambda_h * dot(v, n) * ds
+    # L = delta_0 * exact_solution * dot(v, n) * ds
+
+    # Flux Least-squares as in DG
+    # a = delta_0 * inner(u + grad(p), v + grad(q)) * dx
+
+    # Classical mixed Darcy eq. first-order terms as stabilizing terms
+    a += delta_1 * (inner(u, v) - div(v) * p) * dx
+    a += delta_1("+") * lambda_h("+") * jump(v, n=n) * dS
+    a += delta_1 * lambda_h * dot(v, n) * ds
+
+    # Mass balance least-square
+    a += delta_2 * div(u) * div(v) * dx
+    L = delta_2 * f * div(v) * dx
+
+    # Irrotational least-squares
+    a += delta_3 * inner(curl(u), curl(v)) * dx
+
+    # Hybridization terms
+    a += mu_h("+") * jump(u_hat, n=n) * dS
+    a += mu_h * (lambda_h - p_exact) * ds
+    # a += mu_h * dot(u_hat, n) * ds
+    # L += mu_h * dot(sigma_e, n) * ds
+    a += delta_4("+") * (p("+") - lambda_h("+")) * (q("+") - mu_h("+")) * dS
+    a += delta_4 * (p - p_exact) * q * ds
+    a += delta_4 * (lambda_h - p_exact) * mu_h * ds
+    # a += delta_4 * (exact_solution - lambda_h) * (q - mu_h) * ds
+    # Alternative primal
+    # a += delta_4("+") * (lambda_h("+") - p("+")) * (mu_h("+") - q("+")) * dS
+    # a += delta_4 * (lambda_h - p) * (mu_h - q) * ds
+    # Flux
+    a += delta_5("+") * (dot(u, n)("+") - dot(u_hat, n)("+")) * (dot(v, n)("+") - dot(v_hat, n)("+")) * dS
+    a += delta_5 * (dot(u, n) - dot(u_hat, n)) * (dot(v, n) - dot(v_hat, n)) * ds
+    # Alternative
+    # a += delta_5("+") * (dot(u_hat, n)("+") - dot(u, n)("+")) * (dot(v_hat, n)("+") - dot(v, n)("+")) * dS
+    # a += delta_5 * (dot(u_hat, n) - dot(u, n)) * (dot(v_hat, n) - dot(v, n)) * ds
+
+    # Weakly imposed BC from hybridization
+    # a += mu_h * (lambda_h - exact_trace) * ds
+    # a += mu_h * lambda_h * ds
+    # ###
+    # a += (
+    #     delta_4 * (mu_h - q) * (lambda_h - exact_solution) * ds
+    # )  # maybe this is not a good way to impose BC, but this necessary
+    # a += (
+    #     delta_4 * (q - mu_h) * (exact_solution - lambda_h) * ds
+    # )  # maybe this is not a good way to impose BC, but this necessary
+    L += delta_1 * exact_solution * dot(v, n) * ds  # study if this is a good BC imposition
+
+    F = a - L
+
+    params = {
+        "snes_type": "ksponly",
+        "mat_type": "matfree",
+        "pmat_type": "matfree",
+        "ksp_type": "preonly",
+        "pc_type": "python",
+        # Use the static condensation PC for hybridized problems
+        # and use a direct solve on the reduced system for lambda_h
+        "pc_python_type": "firedrake.SCPC",
+        "pc_sc_eliminate_fields": "0, 1",
+        "condensed_field": {
+            "ksp_type": "preonly",
+            "pc_type": "lu",
+            "pc_factor_mat_solver_type": "mumps",
+        },
+    }
+    # problem = NonlinearVariationalProblem(F, solution, bcs=bcs)
+    problem = NonlinearVariationalProblem(F, solution)
+    solver = NonlinearVariationalSolver(problem, solver_parameters=params)
+    solver.solve()
+
+    # Retrieving the solution
+    sigma_h, p_h, lambda_h = solution.split()
+    sigma_h.rename('Velocity', 'label')
+    p_h.rename('Pressure', 'label')
+
+    # Calculating L2-error for primal variable
+    p_error_L2 = errornorm(exact_solution, p_h, norm_type="L2")
+
+    # Calculating H1-error for primal variable
+    p_error_H1 = errornorm(exact_solution, p_h, norm_type="H1")
+
+    # Calculating L2-error for flux variable
+    sigma_error_L2 = errornorm(sigma_e, sigma_h, norm_type="L2")
+
+    # Calculating Hdiv-error for flux variable
+    sigma_error_Hdiv = errornorm(sigma_e, sigma_h, norm_type="Hdiv")
+
+    return p_error_L2, p_error_H1, sigma_error_L2, sigma_error_Hdiv
+
+
+def solve_poisson_lsh_expanded(
+    mesh, 
+    degree=1, 
+    is_multiplier_continuous=False
+):
+    # Function space declaration
+    use_quads = str(mesh.ufl_cell()) == "quadrilateral"
+    pressure_family = 'DQ' if use_quads else 'DG'
+    velocity_family = 'DQ' if use_quads else 'DG'
+    U = VectorFunctionSpace(mesh, velocity_family, degree)
+    V = FunctionSpace(mesh, pressure_family, degree)
+    if is_multiplier_continuous:
+        LagrangeElement = FiniteElement("Lagrange", mesh.ufl_cell(), degree)
+        C0TraceElement = LagrangeElement["facet"]
+        T = FunctionSpace(mesh, C0TraceElement)
+    else:
+        trace_family = "HDiv Trace"
+        T = FunctionSpace(mesh, trace_family, degree)
+    W = U * V * T
+
+    # Trial and test functions
+    solution = Function(W)
+    u, p, lambda_h = split(solution)
+    # u, p, lambda_h = TrialFunctions(W)
+    v, q, mu_h  = TestFunctions(W)
+
+    # Mesh entities
+    n = FacetNormal(mesh)
+    h = CellDiameter(mesh)
+    x, y = SpatialCoordinate(mesh)
+
+    # Exact solution
+    exact_solution, sigma_e, exact_trace = calculate_exact_solution_with_trace(
+        mesh, 
+        pressure_family, 
+        velocity_family, 
+        degree + 3, 
+        degree + 3
+    )
+
+    # Forcing function
+    f = div(-grad(exact_solution))
+
+    # BCs
+    p_exact = exact_trace
+
+    # Hybridization parameter
+    beta_0 = Constant(1.0e0)
+    beta = beta_0 / h
+    # beta = beta_0
+
+    # Stabilizing parameter
+    delta = Constant(1.0)
+    delta_0 = Constant(1)
+    delta_1 = Constant(0)  #* delta
+    delta_2 = delta
+    delta_3 = delta
+    beta_1 = Constant(0.0e0)
+    delta_4 = beta_1 / h
+    # delta_5 = LARGE_NUMBER / h
+
+    # Numerical flux trace
+    u_hat = u + beta * (p - lambda_h) * n
+
+    # Flux least-squares
+    # Comments: For this expanded form, when using every parameter as one (note that edge terms in flux contribution should match
+    # with transmission condition weighting), super convergence was achieved for triangles for degree = 1.
+    # It is important to note that, in such a case, beta is not zero, so u_hat edge stabilization should be included.
+    a = (
+        (inner(u, v) - q * div(u) - p * div(v) + inner(grad(p), grad(q)))
+        * delta_0
+        * dx
+    )
+    # These terms below are unsymmetric
+    a += delta_0("+") * jump(u_hat, n=n) * q("+") * dS
+    a += delta_0 * dot(u, n) * q * ds
+    a += delta_0 * beta * (p - p_exact) * q * ds
+    a += delta_0("+") * lambda_h("+") * jump(v, n=n) * dS
+    # a += delta_0 * lambda_h * dot(v, n) * ds
+    L = -delta_0 * p_exact * dot(v, n) * ds
+
+    # Flux Least-squares as in DG
+    # a += delta_0 * inner(u + grad(p), v + grad(q)) * dx
+
+    # Classical mixed Darcy eq. first-order terms as stabilizing terms
+    a += delta_1 * (inner(u, v) - div(v) * p) * dx
+    a += delta_1("+") * lambda_h("+") * jump(v, n=n) * dS
+    a += delta_1 * lambda_h * dot(v, n) * ds
+    L += delta_1 * p_exact * dot(v, n) * ds  # study if this is a good BC imposition
+
+    # Mass balance least-square
+    a += delta_2 * div(u) * div(v) * dx
+    L += delta_2 * f * div(v) * dx
+
+    # Irrotational least-squares
+    a += delta_3 * inner(curl(u), curl(v)) * dx
+
+    # Hybridization terms
+    a += mu_h("+") * jump(u_hat, n=n) * dS
+    a += mu_h * (lambda_h - p_exact) * ds
+    a += Constant(0) * delta_4("+") * (p("+") - lambda_h("+")) * (q("+") - mu_h("+")) * dS
+    a += delta_4 * (p - p_exact) * q * ds
+    a += delta_4 * (lambda_h - p_exact) * mu_h * ds
+
+    F = a - L
+
+    params = {
+        "snes_type": "ksponly",
+        "mat_type": "matfree",
+        "pmat_type": "matfree",
+        "ksp_type": "preonly",
+        "pc_type": "python",
+        # Use the static condensation PC for hybridized problems
+        # and use a direct solve on the reduced system for lambda_h
+        "pc_python_type": "firedrake.SCPC",
+        "pc_sc_eliminate_fields": "0, 1",
+        "condensed_field": {
+            "ksp_type": "preonly",
+            "pc_type": "lu",
+            "pc_factor_mat_solver_type": "mumps",
+        },
+    }
+    # problem = NonlinearVariationalProblem(F, solution, bcs=bcs)
+    problem = NonlinearVariationalProblem(F, solution)
+    solver = NonlinearVariationalSolver(problem, solver_parameters=params)
+    solver.solve()
+
+    # Retrieving the solution
+    sigma_h, p_h, lambda_h = solution.split()
+    sigma_h.rename('Velocity', 'label')
+    p_h.rename('Pressure', 'label')
+
+    # Calculating L2-error for primal variable
+    p_error_L2 = errornorm(exact_solution, p_h, norm_type="L2")
+
+    # Calculating H1-error for primal variable
+    p_error_H1 = errornorm(exact_solution, p_h, norm_type="H1")
+
+    # Calculating L2-error for flux variable
+    sigma_error_L2 = errornorm(sigma_e, sigma_h, norm_type="L2")
+
+    # Calculating Hdiv-error for flux variable
+    sigma_error_Hdiv = errornorm(sigma_e, sigma_h, norm_type="Hdiv")
+
+    return p_error_L2, p_error_H1, sigma_error_L2, sigma_error_Hdiv
+
+
+def solve_poisson_lsh_embedded_mass(
+    mesh, 
+    degree=1, 
+    is_multiplier_continuous=False
+):
+    # Function space declaration
+    use_quads = str(mesh.ufl_cell()) == "quadrilateral"
+    pressure_family = 'DQ' if use_quads else 'DG'
+    velocity_family = 'DQ' if use_quads else 'DG'
+    U = VectorFunctionSpace(mesh, velocity_family, degree)
+    V = FunctionSpace(mesh, pressure_family, degree)
+    if is_multiplier_continuous:
+        LagrangeElement = FiniteElement("Lagrange", mesh.ufl_cell(), degree)
+        C0TraceElement = LagrangeElement["facet"]
+        T = FunctionSpace(mesh, C0TraceElement)
+    else:
+        trace_family = "HDiv Trace"
+        T = FunctionSpace(mesh, trace_family, degree)
+    W = U * V * T
+
+    # Trial and test functions
+    solution = Function(W)
+    u, p, lambda_h = split(solution)
+    # u, p, lambda_h = TrialFunctions(W)
+    v, q, mu_h  = TestFunctions(W)
+
+    # Mesh entities
+    n = FacetNormal(mesh)
+    h = CellDiameter(mesh)
+    x, y = SpatialCoordinate(mesh)
+
+    # Exact solution
+    exact_solution, sigma_e, exact_trace = calculate_exact_solution_with_trace(
+        mesh, 
+        pressure_family, 
+        velocity_family, 
+        degree + 3, 
+        degree + 3
+    )
+
+    # Forcing function
+    f = div(-grad(exact_solution))
+
+    # BCs
+    p_exact = exact_trace
+
+    # Hybridization parameter
+    beta_0 = Constant(0.0e0)
+    beta = beta_0 / h
+    # beta = beta_0
+
+    # Stabilizing parameter
+    delta = Constant(0.5)
+    delta_0 = delta * Constant(1) * h * h
+    delta_1 = Constant(1)  #* delta
+    delta_2 = delta * h * h
+    delta_3 = delta * h * h
+    beta_1 = Constant(1.0e0)
+    delta_4 = beta_1 / h
+    delta_5 = delta * Constant(0)  #/ h
+    # delta_5 = LARGE_NUMBER / h
+
+    # Numerical flux trace
+    u_hat = u + beta * (p - lambda_h) * n
+
+    # Flux least-squares
+    # Comments: For this expanded form, when using every parameter as one (note that edge terms in flux contribution should match
+    # with transmission condition weighting), super convergence was achieved for triangles for degree = 1.
+    # It is important to note that, in such a case, beta is not zero, so u_hat edge stabilization should be included.
+    a = (
+        (inner(u, v) - q * div(u) - p * div(v) + inner(grad(p), grad(q)))
+        * delta_0
+        * dx
+    )
+    # These terms below are unsymmetric
+    a += delta_0("+") * jump(u_hat, n=n) * q("+") * dS
+    a += delta_0 * dot(u, n) * q * ds
+    a += delta_0 * beta * (p - p_exact) * q * ds
+    a += delta_0("+") * lambda_h("+") * jump(v, n=n) * dS
+    a += delta_0 * lambda_h * dot(v, n) * ds
+    # L = delta_0 * exact_solution * dot(v, n) * ds
+
+    # Flux Least-squares as in DG
+    # a = delta_0 * inner(u + grad(p), v + grad(q)) * dx
+
+    # Classical mass residual term
+    a += -delta_1 * dot(u, grad(q)) * dx
+    a += delta_1("+") * q("+") * jump(u_hat, n=n) * dS
+    a += delta_1 * dot(u, n) * q * ds
+    a += delta_1 * beta * (p - lambda_h) * q * ds
+    L = delta_1 * f * q * dx
+
+    # Mass balance least-square
+    a += delta_2 * div(u) * div(v) * dx
+    L += delta_2 * f * div(v) * dx
+
+    # Irrotational least-squares
+    a += delta_3 * inner(curl(u), curl(v)) * dx
+
+    # Hybridization terms
+    a += mu_h("+") * jump(u_hat, n=n) * dS
+    a += mu_h * (lambda_h - p_exact) * ds
+    a += delta_4("+") * (p("+") - lambda_h("+")) * (q("+") - mu_h("+")) * dS
+    a += delta_4 * (p - p_exact) * q * ds
+    a += delta_4 * (lambda_h - p_exact) * mu_h * ds
+
+    F = a - L
+
+    params = {
+        "snes_type": "ksponly",
+        "mat_type": "matfree",
+        "pmat_type": "matfree",
+        "ksp_type": "preonly",
+        "pc_type": "python",
+        # Use the static condensation PC for hybridized problems
+        # and use a direct solve on the reduced system for lambda_h
+        "pc_python_type": "firedrake.SCPC",
+        "pc_sc_eliminate_fields": "0, 1",
+        "condensed_field": {
+            "ksp_type": "preonly",
+            "pc_type": "lu",
+            "pc_factor_mat_solver_type": "mumps",
+        },
+    }
+    # problem = NonlinearVariationalProblem(F, solution, bcs=bcs)
+    problem = NonlinearVariationalProblem(F, solution)
+    solver = NonlinearVariationalSolver(problem, solver_parameters=params)
+    solver.solve()
+
+    # Retrieving the solution
+    sigma_h, p_h, lambda_h = solution.split()
+    sigma_h.rename('Velocity', 'label')
+    p_h.rename('Pressure', 'label')
+
+    # Calculating L2-error for primal variable
+    p_error_L2 = errornorm(exact_solution, p_h, norm_type="L2")
+
+    # Calculating H1-error for primal variable
+    p_error_H1 = errornorm(exact_solution, p_h, norm_type="H1")
+
+    # Calculating L2-error for flux variable
+    sigma_error_L2 = errornorm(sigma_e, sigma_h, norm_type="L2")
+
+    # Calculating Hdiv-error for flux variable
+    sigma_error_Hdiv = errornorm(sigma_e, sigma_h, norm_type="Hdiv")
+
+    return p_error_L2, p_error_H1, sigma_error_L2, sigma_error_Hdiv
+
+
+def solve_poisson_lsh_primal(
+    mesh, 
+    degree=1, 
+    is_multiplier_continuous=True
+):
+    # Function space declaration
+    use_quads = str(mesh.ufl_cell()) == "quadrilateral"
+    pressure_family = 'DQ' if use_quads else 'DG'
+    velocity_family = 'DQ' if use_quads else 'DG'
+    U = VectorFunctionSpace(mesh, velocity_family, degree)
+    p_degree = degree
+    V = FunctionSpace(mesh, pressure_family, p_degree)
+    if is_multiplier_continuous:
+        LagrangeElement = FiniteElement("Lagrange", mesh.ufl_cell(), degree)
+        C0TraceElement = LagrangeElement["facet"]
+        T = FunctionSpace(mesh, C0TraceElement)
+    else:
+        trace_family = "HDiv Trace"
+        T = FunctionSpace(mesh, trace_family, degree)
+    W = V * T
+
+    # Trial and test functions
+    solution = Function(W)
+    p, lambda_h = split(solution)
+    # u, p, lambda_h = TrialFunctions(W)
+    q, mu_h  = TestFunctions(W)
+
+    # Mesh entities
+    n = FacetNormal(mesh)
+    h = CellDiameter(mesh)
+    x, y = SpatialCoordinate(mesh)
+
+    # Exact solution
+    exact_solution, sigma_e, exact_trace = calculate_exact_solution_with_trace(
+        mesh, 
+        pressure_family, 
+        velocity_family, 
+        degree + 3, 
+        degree + 3
+    )
+
+    # Forcing function
+    f = div(-grad(exact_solution))
+
+    # BCs
+    p_exact = exact_trace
+    # bcs = DirichletBC(W.sub(2), exact_trace, "on_boundary")
+    bcs = DirichletBC(W.sub(1), p_exact, "on_boundary")
+
+    # Hybridization parameter
+    penalty_constant = 1e1
+    beta_0 = Constant(penalty_constant * p_degree * p_degree) * Constant(1)
+    beta = beta_0 / h
+
+    # Stabilizing parameter (working perfectly)
+    delta_base = h * h
+    delta_0 = Constant(1)
+    delta_1 = delta_base * Constant(1)
+    delta_2 = Constant(penalty_constant * p_degree * p_degree) / h
+    
+    # Stabilizing parameter (tests)
+    delta_base = h * h
+    delta_0 = Constant(1)
+    delta_1 = delta_base * Constant(1)
+    # delta_2 = delta_base * Constant(6 * degree) / h
+    delta_2 = Constant(penalty_constant * p_degree * p_degree) / delta_base
+    # delta_2 = delta_1
+    # delta_2 = beta
+    # delta_2 = delta_base * Constant(1) / h
+
+    # Flux variables
+    u = -grad(p)
+    v = -grad(q)
+
+    # Symmetry parameter: s = 1 (symmetric) or s = -1 (unsymmetric). Disable with 0.
+    s = Constant(1)
+
+    # Numerical flux trace
+    u_hat = u + beta * (p - lambda_h) * n
+
+    # Classical term
+    a = delta_0 * dot(grad(p), grad(q)) * dx + delta_0('+') * jump(u_hat, n) * q("+") * dS
+    # a += delta_0 * dot(u_hat, n) * q * ds
+    a += delta_0 * dot(u, n) * q * ds +  delta_0 * beta * (p - exact_solution) * q * ds  # expand u_hat product in ds
+    L = delta_0 * f * q * dx
+
+    # Mass balance least-squares
+    a += delta_1 * div(u) * div(v) * dx
+    a += delta_1 * inner(curl(u), curl(v)) * dx
+    L += delta_1 * f * div(v) * dx
+
+    # Hybridization terms
+    a += -mu_h("+") * jump(u_hat, n=n) * dS
+    # a += mu_h * (lambda_h - p_exact) * ds
+    # a += mu_h * dot(u_hat - grad(exact_solution), n) * ds  # is this worthy?
+    a += delta_2("+") * (p("+") - lambda_h("+")) * (q("+") - mu_h("+")) * dS
+    # a += delta_2 * (p - p_exact) * (q - mu_h) * ds
+    a += delta_2 * (p - exact_solution) * q * ds  # needed if not included as strong BC
+    a += delta_2 * (lambda_h - p_exact) * mu_h * ds  # needed if not included as strong BC
+    # a += (
+    #     delta_3 * (q - mu_h) * (exact_solution - lambda_h) * ds
+    # )  # maybe this is not a good way to impose BC, but this necessary
+
+    # Consistent symmetrization
+    a += s * delta_0 * jump(v, n) * (p('+') - lambda_h("+")) * dS
+    a += s * delta_0 * dot(v, n) * (p - exact_solution) * ds
+
+    F = a - L
+
+    params = {
+        "snes_type": "ksponly",
+        "mat_type": "matfree",
+        "pmat_type": "matfree",
+        "ksp_type": "preonly",
+        "pc_type": "python",
+        # Use the static condensation PC for hybridized problems
+        # and use a direct solve on the reduced system for lambda_h
+        "pc_python_type": "firedrake.SCPC",
+        "pc_sc_eliminate_fields": "0",
+        "condensed_field": {
+            "ksp_type": "preonly",
+            # 'ksp_view': None,
+            "pc_type": "lu",
+            "pc_factor_mat_solver_type": "mumps",
+            # "mat_mumps_icntl_4": "2",
+        },
+    }
+    # problem = NonlinearVariationalProblem(F, solution, bcs=bcs)
+    problem = NonlinearVariationalProblem(F, solution)
+    solver = NonlinearVariationalSolver(problem, solver_parameters=params)
+    solver.solve()
+
+    # Retrieving the solution
+    p_h, lambda_h = solution.split()
+    sigma_h = Function(U, name='Velocity')
+    sigma_h.project(-grad(p_h))
     sigma_h.rename('Velocity', 'label')
     p_h.rename('Pressure', 'label')
 
@@ -1660,11 +2659,19 @@ def compute_convergence_hp(
         "Element": list(),
         "Degree": list(),
         "Cells": list(),
+        "log Cells": list(),
         "Mesh size": list(),
         "L2-error p": list(),
+        "log L2-error p": list(),
+        "L2-error p order": list(),
         "H1-error p": list(),
+        "log H1-error p": list(),
+        "H1-error p order": list(),
         "L2-error u": list(),
+        "log L2-error u": list(),
+        "L2-error u order": list(),
         "Hdiv-error u": list(),
+        "Hdiv-error u order": list(),
     }
     element_kind = "Quad" if quadrilateral else "Tri"
     for degree in range(min_degree, max_degree):
@@ -1696,18 +2703,22 @@ def compute_convergence_hp(
             computed_errors_dict["Element"].append(element_kind)
             computed_errors_dict["Degree"].append(degree)
             computed_errors_dict["Cells"].append(current_num_cells)
+            computed_errors_dict["log Cells"].append(np.log10(current_num_cells) / 2)
             computed_errors_dict["Mesh size"].append(current_mesh_size)
             computed_errors_dict["L2-error p"].append(current_error_p_L2)
+            computed_errors_dict["log L2-error p"].append(np.log10(current_error_p_L2))
             computed_errors_dict["H1-error p"].append(current_error_p_H1)
+            computed_errors_dict["log H1-error p"].append(np.log10(current_error_p_H1))
             computed_errors_dict["L2-error u"].append(current_error_v_L2)
+            computed_errors_dict["log L2-error u"].append(np.log10(current_error_v_L2))
             computed_errors_dict["Hdiv-error u"].append(current_error_v_Hdiv)
 
-        p_L2_errors_log2 = np.log2(p_errors_L2)
-        p_H1_errors_log2 = np.log2(p_errors_H1)
-        v_L2_errors_log2 = np.log2(v_errors_L2)
-        v_Hdiv_errors_log2 = np.log2(v_errors_Hdiv)
-        num_cells_log2 = np.log2(num_cells)
-        mesh_size_log2 = np.log2(mesh_size)
+        p_L2_errors_log2 = np.log10(p_errors_L2)
+        p_H1_errors_log2 = np.log10(p_errors_H1)
+        v_L2_errors_log2 = np.log10(v_errors_L2)
+        v_Hdiv_errors_log2 = np.log10(v_errors_Hdiv)
+        num_cells_log2 = np.log10(num_cells)
+        mesh_size_log2 = np.log10(mesh_size)
 
         PETSc.Sys.Print("\n--------------------------------------")
 
@@ -1739,6 +2750,12 @@ def compute_convergence_hp(
             % (degree, np.abs(v_slope_Hdiv))
         )
 
+        num_mesh_evaluations = len(numel_xy)
+        computed_errors_dict["L2-error p order"] += num_mesh_evaluations * [np.abs(p_slope_L2)]
+        computed_errors_dict["H1-error p order"] += num_mesh_evaluations * [np.abs(p_slope_H1)]
+        computed_errors_dict["L2-error u order"] += num_mesh_evaluations * [np.abs(v_slope_L2)]
+        computed_errors_dict["Hdiv-error u order"] += num_mesh_evaluations * [np.abs(v_slope_Hdiv)]
+
         PETSc.Sys.Print("\n--------------------------------------")
 
     dir_name = f"./conv_rate_results/conv_results_{name}"
@@ -1759,9 +2776,15 @@ available_solvers = {
     # "ls": solve_poisson_ls,  # Compare
     # "dls": solve_poisson_dls,
     # "lsh": solve_poisson_lsh,  # Compare
+    # "lsh_alternative": solve_poisson_lsh_alternative,  # Compare
+    # "lsh_expanded": solve_poisson_lsh_expanded,  # Compare
+    # "lsh_embedded_mass": solve_poisson_lsh_embedded_mass,  # Compare
+    "new_lsh_primal": solve_poisson_lsh_primal,
+    # "dls_ip_primal": solve_poisson_dls_primal,
+    # "cls_ip_primal": solve_poisson_cls_primal,
     # "vms": solve_poisson_vms,  # Compare
     # "dvms": solve_poisson_dvms,  # Compare
-    "mixed_RT": solve_poisson_mixed_RT,  # Compare
+    # "mixed_RT": solve_poisson_mixed_RT,  # Compare
     # "hdg": solve_poisson_hdg,  # Compare
     # "cgh": solve_poisson_cgh,
     # "ldgc": solve_poisson_ldgc,
@@ -1771,10 +2794,11 @@ available_solvers = {
 degree = 1
 last_degree = 4
 # mesh_quad = [False, True]  # Triangles, Quads
-mesh_quad = [True]
+mesh_quad = [False]
 # elements_for_each_direction = [15, 20, 25, 30, 35, 40]
-# elements_for_each_direction = [4, 8, 16, 32, 64, 128]
-elements_for_each_direction = [4, 6, 8, 10, 12, 14]
+# elements_for_each_direction = [4, 8, 16, 32, 64, 128]  # for PhD
+elements_for_each_direction = [4, 8, 16, 32, 64]
+# elements_for_each_direction = [4, 6, 8, 10, 12, 14]
 for element in mesh_quad:
     for current_solver in available_solvers:
 
@@ -1796,7 +2820,7 @@ for element in mesh_quad:
         compute_convergence_hp(
             solver,
             min_degree=degree,
-            max_degree=degree + last_degree,
+            max_degree=last_degree + 1,
             quadrilateral=element,
             numel_xy=elements_for_each_direction,
             name=name

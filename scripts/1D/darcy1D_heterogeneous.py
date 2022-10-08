@@ -26,21 +26,12 @@ kSpace = FunctionSpace(mesh, "DG", 0)
 k1 = 1.0
 k2 = 0.1
 
-# Tolerance to a small perturbation
-tol = 1.e-14
-
-
-# The permeability class to compute values
-class DiscontinuousPermeability(Expression):
-    def eval(self, values, x):
-        if x[0] < Lx / 2. + tol:
-            values[0] = k1
-        else:
-            values[0] = k2
-
+# The discontinuous permeability definition
+x, = SpatialCoordinate(mesh)
+discontinous_permeability = conditional(le(x, Lx / 2), k1, k2)
 
 # Interpolating in the permeability space
-k = interpolate(DiscontinuousPermeability(), kSpace)
+k = interpolate(discontinous_permeability, kSpace)
 
 # Source term
 f = Constant(1.0)
@@ -71,6 +62,11 @@ grad_p.project(grad(solution)[0])
 
 # Plotting the solution
 plot(solution)
+plt.savefig("darcy1D_heterogeneous_pressure.png")
+
 plot(flux)
+plt.savefig("darcy1D_heterogeneous_flux.png")
+
 plot(grad_p)
-plt.show()
+plt.savefig("darcy1D_heterogeneous_grad_p.png")
+# plt.show()

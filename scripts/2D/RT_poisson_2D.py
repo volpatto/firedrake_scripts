@@ -25,6 +25,8 @@ else:
 
 degree = 1
 U = FunctionSpace(mesh, hdiv_family, degree + 1)
+# RTk = FiniteElement("Raviart-Thomas", triangle, degree + 1, variant="integral")
+# U = FunctionSpace(mesh, RTk)
 V = FunctionSpace(mesh, pressure_family, degree)
 W = U * V
 
@@ -42,18 +44,18 @@ p_exact = sin(2 * pi * x) * sin(2 * pi * y)
 exact_solution = Function(V).interpolate(p_exact)
 exact_solution.rename("Exact pressure", "label")
 sigma_e = Function(U, name='Exact velocity')
-sigma_e.project(-grad(p_exact))
+sigma_e.interpolate(-grad(p_exact))
 
 # Forcing function
 f_expression = div(-grad(p_exact))
 f = Function(V).interpolate(f_expression)
 
 # Dirichlet BCs (not necessary to impose in this case)
-# bcs = DirichletBC(W[0], sigma_e, "on_boundary")
+bcs = DirichletBC(W[0], sigma_e, "on_boundary")
 
 # Mixed classical terms
-a = (dot(u, v) - div(v) * p + q * div(u)) * dx
-L = f * q * dx - dot(v, n) * exact_solution * ds
+a = (dot(u, v) - div(v) * p - q * div(u)) * dx
+L = -f * q * dx - dot(v, n) * exact_solution * ds
 
 solver_parameters = {
     "ksp_monitor": None,

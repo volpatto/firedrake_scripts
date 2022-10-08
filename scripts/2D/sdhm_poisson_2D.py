@@ -10,28 +10,29 @@ def print(content_to_print):
     return PETSc.Sys.Print(content_to_print)
 
 
-# parameters["pyop2_options"]["lazy_evaluation"] = False
+parameters["pyop2_options"]["lazy_evaluation"] = False
 PETSc.Log.begin()
 
 # Defining the mesh
 N = 10
-use_quads = True
+use_quads = False
 mesh = UnitSquareMesh(N, N, quadrilateral=use_quads)
 comm = mesh.comm
 
 # Function space declaration
-is_multiplier_continuous = False
 pressure_family = 'DQ' if use_quads else 'DG'
 velocity_family = 'DQ' if use_quads else 'DG'
 degree = 1
+is_multiplier_continuous = False
 U = VectorFunctionSpace(mesh, velocity_family, degree)
 V = FunctionSpace(mesh, pressure_family, degree)
+Vref = FunctionSpace(mesh, pressure_family, degree + 3)
 if is_multiplier_continuous:
     LagrangeElement = FiniteElement("Lagrange", mesh.ufl_cell(), degree)
     C0TraceElement = LagrangeElement["facet"]
     T = FunctionSpace(mesh, C0TraceElement)
 else:
-    trace_family = "HDiv Trace"
+    trace_family = "DGT"
     T = FunctionSpace(mesh, trace_family, degree)
 W = U * V * T
 
@@ -48,54 +49,62 @@ x, y = SpatialCoordinate(mesh)
 
 # Exact solution
 p_exact = sin(2 * pi * x) * sin(2 * pi * y)
-exact_solution = Function(V).interpolate(p_exact)
+# p_exact = sin(0.5 * pi * x) * sin(0.5 * pi * y)
+exact_solution = Function(Vref).interpolate(p_exact)
 exact_solution.rename("Exact pressure", "label")
 sigma_e = Function(U, name='Exact velocity')
 sigma_e.project(-grad(p_exact))
 
 # Forcing function
 f_expression = div(-grad(p_exact))
-f = Function(V).interpolate(f_expression)
+f = Function(Vref).interpolate(f_expression)
 
 # Dirichlet BCs
-bc_multiplier = DirichletBC(W.sub(2), Constant(0.0), "on_boundary")
-
-# BCs
-p_boundaries = Constant(0.0)
-u_projected = sigma_e
+bc_multiplier = DirichletBC(W.sub(2), p_exact, "on_boundary")
 
 # Hybridization parameter
 beta_0 = Constant(1.0e0)
 beta = beta_0 / h
 # beta = beta_0
 
-# Stabilization parameters
-delta_0 = Constant(-1)
-delta_1 = Constant(-0.5)  #* h * h
-delta_2 = Constant(0.5)  #* h * h
-delta_3 = Constant(0.5)  #* h * h
+# Least-Squares parameters and symmetry parameter
+delta_0 = Constant(-1)  # for symmetry, use -1
+delta_1 = Constant(-0.5) * h * h
+delta_2 = Constant(0.0) * h * h
+delta_3 = Constant(0.0) * h * h
 
-# Mixed classical terms
-a = (dot(u, v) - div(v) * p + delta_0 * q * div(u)) * dx
+# Numerical flux trace
+u_hat = u + beta * (p - lambda_h) * n
+
+# HDG classical form
+a = (dot(u, v) - div(v) * p) * dx + lambda_h("+") * jump(v, n) * dS
+a += delta_0 * div(u) * q * dx
 L = delta_0 * f * q * dx
-# Stabilizing terms
+
+# Least-squares terms
 a += delta_1 * inner(u + grad(p), v + grad(q)) * dx
 a += delta_2 * div(u) * div(v) * dx
 a += delta_3 * inner(curl(u), curl(v)) * dx
 L += delta_2 * f * div(v) * dx
-# Hybridization terms
-a += lambda_h("+") * dot(v, n)("+") * dS + mu_h("+") * dot(u, n)("+") * dS
-a += beta("+") * (lambda_h("+") - p("+")) * (mu_h("+") - q("+")) * dS
+
+# Transmission condition
+a += jump(u_hat, n) * mu_h("+") * dS
+
+# Nitsche's term to transmission condition edge stabilization
+a += -beta('+') * (p('+') - lambda_h('+')) * q('+') * dS
+
 # Weakly imposed BC
-# a += (p_boundaries * dot(v, n) + mu_h * (dot(u, n) - dot(u_projected, n))) * ds
-# a += (p_boundaries * dot(v, n) - mu_h * dot(u_projected, n)) * ds
-a += (p_boundaries * dot(v, n) + mu_h * dot(u, n)) * ds  # this one looks right
-a += beta * (lambda_h - p_boundaries) * mu_h * ds
+# a += lambda_h * dot(v, n) * ds  # required term
+L += -exact_solution * dot(v, n) * ds  # required as the above, but just one of them should be used (works for continuous multiplier)
+a += -beta * p * q * ds  # required term... note that u (the unknown) is used
+L += -beta * exact_solution * q * ds  # Required, this one is paired with the above term
+a += lambda_h * mu_h * ds  # Classical required term
+L += exact_solution * mu_h * ds  # Pair for the above classical required term
 
 F = a - L
 
 # Solving with Static Condensation
-PETSc.Sys.Print("*******************************************\nSolving using static condensation.\n")
+print("*******************************************\nSolving using static condensation.\n")
 params = {
     "snes_type": "ksponly",
     "mat_type": "matfree",
@@ -114,12 +123,29 @@ params = {
     },
 }
 
-# problem = NonlinearVariationalProblem(F, solution, bcs=bc_multiplier)
-problem = NonlinearVariationalProblem(F, solution)
+problem = NonlinearVariationalProblem(F, solution, bcs=[])
+# problem = NonlinearVariationalProblem(F, solution)
 solver = NonlinearVariationalSolver(problem, solver_parameters=params)
 solver.snes.ksp.setConvergenceHistory()
 solver.solve()
-PETSc.Sys.Print("Solver finished.\n")
+print("Solver finished.\n")
+
+# Solving fully coupled system
+# print("*******************************************\nSolving fully coupled system.\n")
+# solver_parameters = {
+#     "ksp_monitor": None,
+#     "mat_type": "aij",
+#     "ksp_type": "preonly",
+#     "pc_type": "lu",
+#     "pc_factor_mat_solver_type": "mumps",
+# }
+# solution = Function(W)
+# # problem = LinearVariationalProblem(a, L, solution, bcs=[bc_multiplier])
+# problem = LinearVariationalProblem(a, L, solution, bcs=[])
+# solver = LinearVariationalSolver(problem, solver_parameters=solver_parameters)
+# solver.snes.ksp.setConvergenceHistory()
+# solver.solve()
+# print("Solver finished.\n")
 
 sigma_h, u_h, lambda_h = solution.split()
 sigma_h.rename('Velocity', 'label')

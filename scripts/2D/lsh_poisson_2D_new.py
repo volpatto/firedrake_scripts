@@ -10,13 +10,13 @@ def print(content_to_print):
     return PETSc.Sys.Print(content_to_print)
 
 
-# parameters["pyop2_options"]["lazy_evaluation"] = False
+parameters["pyop2_options"]["lazy_evaluation"] = False
 PETSc.Log.begin()
 
 # Defining the mesh
 N = 10
-use_quads = True
-mesh = UnitSquareMesh(N, N, quadrilateral=use_quads, diagonal="right")
+use_quads = False
+mesh = UnitSquareMesh(N, N, quadrilateral=use_quads)
 comm = mesh.comm
 
 # Function space declaration
@@ -25,7 +25,9 @@ pressure_family = 'DQ' if use_quads else 'DG'
 velocity_family = 'DQ' if use_quads else 'DG'
 degree = 1
 U = VectorFunctionSpace(mesh, velocity_family, degree)
+Ue = VectorFunctionSpace(mesh, velocity_family, degree + 3)
 V = FunctionSpace(mesh, pressure_family, degree)
+Ve = FunctionSpace(mesh, pressure_family, degree + 3)
 if is_multiplier_continuous:
     LagrangeElement = FiniteElement("Lagrange", mesh.ufl_cell(), degree)
     C0TraceElement = LagrangeElement["facet"]
@@ -47,23 +49,24 @@ h = CellDiameter(mesh)
 x, y = SpatialCoordinate(mesh)
 
 # Exact solution
-p_exact = sin(2 * pi * x) * sin(2 * pi * y)
-exact_solution = Function(V).interpolate(p_exact)
+# p_exact = sin(0.5 * pi * x) * sin(0.5 * pi * y)
+# p_exact = - (x * x / 2 - x * x * x / 3 + x ** 4 / 4) * (y * y / 2 - y * y * y / 3 + y ** 4 / 4)
+p_exact = - (x * x / 2 - x * x * x / 3) * (y * y / 2 - y * y * y / 3)
+exact_solution = Function(Ve).interpolate(p_exact)
 exact_solution.rename("Exact pressure", "label")
-sigma_e = Function(U, name='Exact velocity')
+sigma_e = Function(Ue, name='Exact velocity')
 sigma_e.project(-grad(p_exact))
 
 # Forcing function
 f_expression = div(-grad(p_exact))
-f = Function(V).interpolate(f_expression)
+f = Function(Ve).interpolate(f_expression)
+
+# Dirichlet BCs
+bc_multiplier = DirichletBC(W.sub(2), p_exact, "on_boundary")
 
 # BCs
 p_boundaries = Constant(0.0)
 u_projected = sigma_e
-
-# Dirichlet BCs
-bc_multiplier = DirichletBC(W.sub(2), p_exact, "on_boundary")
-bcs = [bc_multiplier]
 
 # Hybridization parameter
 beta_0 = Constant(1.0e0)
@@ -71,18 +74,22 @@ beta_1 = Constant(1.0e0)
 beta = beta_0 / h
 
 # Stabilizing parameter
-# delta = Constant(1)
-delta = h * h
-delta_0 = delta
-delta_1 = Constant(0)
+delta = Constant(1)
+# delta = h * h
+delta_0 = delta * Constant(0)  #* h * h
+# delta_1 = delta
+delta_1 = Constant(1)
 delta_2 = delta
-delta_3 = delta * Constant(1)
-delta_4 = delta * Constant(1)  #/ h
-delta_5 = delta * Constant(1)  #/ h
+delta_3 = delta * Constant(0)  #* h * h
+delta_4 = beta_1 / h * Constant(0)
+# delta_4 = delta * Constant(1)
+# delta_5 = beta_1  #/ h
+delta_5 = delta * Constant(0)
+# delta_6 = delta
+delta_6 = beta_1 / h
 
 # Numerical flux trace
 u_hat = u + beta * (p - lambda_h) * n
-v_hat = v + beta * (q - mu_h) * n
 
 # Flux least-squares
 # a = (
@@ -90,67 +97,75 @@ v_hat = v + beta * (q - mu_h) * n
 #     * delta_1
 #     * dx
 # )
-# a += delta_1("+") * jump(u_hat, n=n) * q("+") * dS
+# a = (
+#     (inner(u, v) + dot(u, grad(q)) - p * div(v) + inner(grad(p), grad(q)))
+#     * delta_1
+#     * dx
+# )
+# a = (
+#     (inner(u, v) - p * div(v))
+#     * delta_1
+#     * dx
+# )
+# a += -dot(u, grad(q)) * dx + delta_1("+") * jump(u_hat, n=n) * q("+") * dS
+# L = f * q * dx
+# a = (
+#     (inner(u, v) - q * div(u) + dot(v, grad(p)) + inner(grad(p), grad(q)))
+#     * delta_1
+#     * dx
+# )
+# # a += delta_1("+") * jump(u_hat, n=n) * q("+") * dS
 # a += delta_1 * dot(u_hat, n) * q * ds
 # # a += delta_1 * dot(u, n) * q * ds
 # # L = -delta_1 * dot(u_projected, n) * q * ds
 # a += delta_1("+") * lambda_h("+") * jump(v, n=n) * dS
 # a += delta_1 * lambda_h * dot(v, n) * ds
-# # L = delta_1 * p_exact * dot(v, n) * ds
+# L += delta_1 * p_exact * dot(v, n) * ds
+
+# # Classical mixed Darcy eq. first-order terms as stabilizing terms
+# a += delta_1 * (inner(u, v) - div(v) * p) * dx
+# a += delta_1("+") * lambda_h("+") * jump(v, n=n) * dS
+# a += delta_1 * lambda_h * dot(v, n) * ds
+
+# Classical mass residual term
+# a += -delta_1 * dot(u, grad(q)) * dx
+# a += delta_1("+") * q("+") * jump(u_hat, n=n) * dS
+# a += delta_1 * dot(u, n) * q * ds
+# a += delta_1 * beta * (p - p_exact) * q * ds
+# L = delta_1 * f * q * dx
+
+# New attempt: Flux least-squares
+a = (
+    (inner(u, v) - q * div(u) - p * div(v) + inner(grad(p), grad(q)))
+    * delta_1
+    * dx
+)
+# These terms below are unsymmetric
+a += delta_1("+") * jump(u_hat, n=n) * q("+") * dS
+a += delta_1 * dot(u, n) * q * ds
+a += delta_1 * beta * (p - p_exact) * q * ds
+a += delta_1("+") * lambda_h("+") * jump(v, n=n) * dS
+# a += delta_1 * lambda_h * dot(v, n) * ds
+L = -delta_1 * p_exact * dot(v, n) * ds   # required as the above, but just one of them should be used (works for continuous multiplier)
 
 # Flux Least-squares as in DG
-a = delta_0 * inner(u + grad(p), v + grad(q)) * dx
-
-# Classical mixed Darcy eq. first-order terms as stabilizing terms
-a += delta_1 * (dot(u, v) - div(v) * p) * dx
-a += delta_1("+") * lambda_h("+") * jump(v, n=n) * dS
-a += delta_1 * lambda_h * dot(v, n) * ds
+a += delta_0 * inner(u + grad(p), v + grad(q)) * dx
 
 # Mass balance least-square
 a += delta_2 * div(u) * div(v) * dx
-# a += -dot(u, grad(q)) * dx + jump(u_hat, n) * q("+") * dS
-L = delta_2 * f * div(v) * dx
-# L = delta_2 * f * div(v) * dx + f * q * dx
+L += delta_2 * f * div(v) * dx
 
 # Irrotational least-squares
 a += delta_3 * inner(curl(u), curl(v)) * dx
 
 # Hybridization terms
-# LARGE_NUMBER = Constant(1e0)
-# beta_h = LARGE_NUMBER / h
-# beta_h = beta
 a += mu_h("+") * jump(u_hat, n=n) * dS
-a += mu_h * (lambda_h - p_exact) * ds
-# a += mu_h * dot(u_hat, n) * ds
-# L += mu_h * dot(sigma_e, n) * ds
-# a += jump(u_hat, n=n) * jump(v, n=n) * dS
-# a += delta_4("+") * jump(u_hat, n=n) * jump(v_hat, n=n) * dS
-# a += beta_h("+") * jump(u_hat, n=n) * jump(v_hat, n=n) * dS
-# a += beta_h * dot(u_hat, n) * dot(v_hat, n) * ds
-# L += beta_h * dot(sigma_e, n) * dot(v_hat, n) * ds
+a += mu_h * dot(u, n) * ds
+a += mu_h * beta * (p_exact - lambda_h) * ds
 
-a += delta_4("+") * (p("+") - lambda_h("+")) * (q("+") - mu_h("+")) * dS
-a += delta_4 * (p - lambda_h) * (q - mu_h) * ds
-
-a += delta_5("+") * (dot(u, n)("+") - dot(u_hat, n)("+")) * (dot(v, n)("+") - dot(v_hat, n)("+")) * dS
-a += delta_5 * (dot(u, n) - dot(u_hat, n)) * (dot(v, n) - dot(v_hat, n)) * ds
-
-# a += delta_5("+") * jump(u_hat, n=n) * jump(v_hat, n=n) * dS
-# a += delta_5 * dot(u_hat, n) * dot(v_hat, n) * ds
-
-# a += delta_5("+") * dot(jump(p, n=n), jump(q, n=n)) * dS
-# a += delta_5 * (p - p_exact) * q * ds
-# 
-# Weakly imposed BC from hybridization
-# a += mu_h * (lambda_h - p_boundaries) * ds
-# ###
-# a += (
-#     delta_4 * (mu_h - q) * (lambda_h - p_exact) * ds
-# )  # maybe this is not a good way to impose BC, but this necessary
-# a += (
-#     delta_4 * (q - mu_h) * (p_exact - lambda_h) * ds
-# )  # maybe this is not a good way to impose BC, but this necessary
-L += delta_1 * p_exact * dot(v, n) * ds  # study if this is a good BC imposition
+a += Constant(0) * delta_4("+") * (p("+") - lambda_h("+")) * (q("+") - mu_h("+")) * dS
+a += delta_4 * (p - p_exact) * q * ds
+a += delta_4 * (lambda_h - p_exact) * mu_h * ds
 
 F = a - L
 
@@ -178,7 +193,7 @@ params = {
 }
 
 problem = NonlinearVariationalProblem(F, solution)
-# problem = NonlinearVariationalProblem(F, solution, bcs=bcs)
+# problem = NonlinearVariationalProblem(F, solution, bcs=bc_multiplier)
 solver = NonlinearVariationalSolver(problem, solver_parameters=params)
 solver.snes.ksp.setConvergenceHistory()
 solver.solve()

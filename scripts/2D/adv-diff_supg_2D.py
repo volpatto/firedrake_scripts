@@ -7,8 +7,8 @@ ufl.set_level(ufl.CRITICAL)
 
 # Mesh definition
 use_quad_mesh = True
-number_of_elements_x = 25
-number_of_elements_y = 25
+number_of_elements_x = 10
+number_of_elements_y = 10
 mesh = UnitSquareMesh(number_of_elements_x, number_of_elements_y, quadrilateral=use_quad_mesh)
 
 # Continuous Galerkin function space (degree = 1)
@@ -36,7 +36,7 @@ v = TestFunction(V)
 # Model's parameters
 k = Constant(1e-8)  # Diffusion
 b = Function(VelSpace)
-b.interpolate(as_vector([1.0, 0.0]))  # Advective velocity
+b.project(as_vector([1.0, 0.0]))  # Advective velocity
 
 # Bilinear form
 a = k * inner(grad(v), grad(u))*dx + dot(b, grad(u)) * v * dx
@@ -62,7 +62,7 @@ b_norm = sqrt(dot(b, b))
 Pe_k = m_k * b_norm * h_k / (2.0 * k)
 one = Constant(1.0)
 eps_k = conditional(gt(Pe_k, one), one, Pe_k)
-tau_k = h_k / (2.0 * b_norm) * eps_k
+tau_k = h_k / (2.0 * b_norm) * eps_k * Constant(1)
 
 # Residual stabilizing terms
 a += inner((dot(b, grad(u)) - k*div(grad(u))), tau_k * dot(b, grad(v))) * dx
@@ -77,11 +77,23 @@ solver = LinearVariationalSolver(problem)
 solver.solve()
 
 # Writing solution to vtk file
-output_pvd = File("result_supg/sol.pvd")
-output_pvd.write(u_sol)
+# output_pvd = File("result_supg/sol.pvd")
+# output_pvd.write(u_sol)
 
 # Plotting the solution
-plot(u_sol)
-plt.xlabel(r'$x$')
-plt.ylabel(r'$y$')
-plt.show()
+fig, axes = plt.subplots(subplot_kw={"projection": "3d"})
+collection = trisurf(u_sol, axes=axes, cmap='coolwarm')
+fig.colorbar(
+    collection,
+    orientation="horizontal",
+    shrink=0.6, 
+    pad=0.1, 
+    label="primal variable"
+)
+axes.view_init(azim=250)
+axes.set_xlim([0, 1])
+axes.set_ylim([0, 1])
+plt.xlabel("x")
+plt.ylabel("y")
+plt.tight_layout()
+plt.savefig("solution.png")

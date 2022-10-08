@@ -10,7 +10,7 @@ def print(content_to_print):
 parameters["pyop2_options"]["lazy_evaluation"] = False
 
 # Defining the mesh
-N = 20
+N = 10
 use_quads = True
 mesh = UnitSquareMesh(N, N, quadrilateral=use_quads)
 comm = mesh.comm
@@ -43,7 +43,7 @@ f_expression = div(-grad(p_exact))
 f = Function(V).interpolate(f_expression)
 
 # Edge stabilizing parameter
-beta0 = Constant(1e1)
+beta0 = Constant(1e2)
 beta = beta0 / h
 
 # Symmetry term. Choose if the method is SIPG (-1) or NIPG (1)
@@ -55,7 +55,8 @@ L = f * q * dx
 # DG edge terms
 a += s * dot(jump(p, n), avg(grad(q))) * dS - dot(avg(grad(p)), jump(q, n)) * dS
 # Edge stabilizing terms
-a += beta("+") * dot(jump(p, n), jump(q, n)) * dS
+a += avg(beta) * dot(jump(p, n), jump(q, n)) * dS
+# a += avg(beta * h * h) * jump(grad(p), n=n) * jump(grad(q), n=n) * dS
 # Weak boundary conditions
 a += s * dot(p * n, grad(q)) * ds - dot(grad(p), q * n) * ds
 a += beta * p * q * ds
@@ -83,6 +84,7 @@ u_h.rename('Pressure', 'label')
 
 # Plotting velocity field exact solution
 fig, axes = plt.subplots()
+triplot(mesh, axes=axes)
 collection = quiver(sigma_e, axes=axes, cmap='coolwarm')
 fig.colorbar(collection)
 plt.xlabel("x")
@@ -95,6 +97,7 @@ plt.savefig("exact_velocity.png")
 fig, axes = plt.subplots()
 collection = tripcolor(exact_solution, axes=axes, cmap='coolwarm')
 fig.colorbar(collection)
+triplot(mesh, axes=axes)
 plt.xlabel("x")
 plt.ylabel("y")
 plt.title("Exact solution for pressure")
@@ -103,6 +106,7 @@ plt.savefig("exact_pressure.png")
 
 # Plotting velocity field numerical solution
 fig, axes = plt.subplots()
+triplot(mesh, axes=axes)
 collection = quiver(sigma_h, axes=axes, cmap='coolwarm')
 fig.colorbar(collection)
 plt.xlabel("x")
@@ -114,6 +118,7 @@ plt.savefig("solution_velocity.png")
 fig, axes = plt.subplots()
 collection = tripcolor(u_h, axes=axes, cmap='coolwarm')
 fig.colorbar(collection)
+triplot(mesh, axes=axes)
 plt.xlabel("x")
 plt.ylabel("y")
 plt.savefig("solution_pressure.png")

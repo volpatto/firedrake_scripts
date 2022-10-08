@@ -1,9 +1,19 @@
-scipy
-betterspy
-wurlitzer
-matplotlib
-numpy
-pandas
+# Utils
 attrs
 rope
 tqdm
+
+# Extra scientific stack
+pandas
+openpyxl
+
+# Notebooks
+jupyter
+notebook
+jupyter_contrib_nbextensions
+jupyter_nbextensions_configurator
+jupytext
+
+# Plotting
+matplotlib
+mpltools

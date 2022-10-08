@@ -10,18 +10,24 @@ try:
 except:
     warning("Matplotlib not imported")
 
-nx, ny = 20, 20
-quads = True
+nx, ny = 10, 10
+quads = False
 mesh = UnitSquareMesh(nx, ny, quadrilateral=quads)
 
 degree = 1
 k_plus = 0
 primal_family = "DQ" if quads else "DG"
+flux_family = "DQ" if quads else "DG"
+is_multiplier_continuous = False
 U = FunctionSpace(mesh, primal_family, degree + k_plus)
-V = VectorFunctionSpace(mesh, "CG", degree + k_plus)
-LagrangeElement = FiniteElement("Lagrange", mesh.ufl_cell(), degree)
-C0TraceElement = LagrangeElement["facet"]
-T = FunctionSpace(mesh, C0TraceElement)
+V = VectorFunctionSpace(mesh, flux_family, degree + k_plus)
+if is_multiplier_continuous:
+    LagrangeElement = FiniteElement("Lagrange", mesh.ufl_cell(), degree)
+    C0TraceElement = LagrangeElement["facet"]
+    T = FunctionSpace(mesh, C0TraceElement)
+else:
+    trace_family = "HDiv Trace"
+    T = FunctionSpace(mesh, trace_family, degree)
 W = U * T
 
 # Trial and test functions
@@ -35,20 +41,23 @@ x, y = SpatialCoordinate(mesh)
 
 # Exact solution and source term projection
 p_exact = sin(2 * pi * x) * sin(2 * pi * y)
-sol_exact = Function(U).interpolate(p_exact)
+# p_exact = x * x * x - 3 * x * y * y
+Uref = FunctionSpace(mesh, primal_family, degree + k_plus)
+Vref = VectorFunctionSpace(mesh, flux_family, degree + k_plus)
+sol_exact = Function(Uref).interpolate(p_exact)
 sol_exact.rename("Exact pressure", "label")
-sigma_e = Function(V, name="Exact velocity")
+sigma_e = Function(Vref, name="Exact velocity")
 sigma_e.project(-grad(p_exact))
 source_expr = div(-grad(p_exact))
-f = Function(U).interpolate(source_expr)
+f = Function(Uref).interpolate(source_expr)
 
 # BCs
-p_boundaries = Constant(0.0)
-bc_multiplier = DirichletBC(W.sub(1), p_boundaries, "on_boundary")
+p_boundaries = sol_exact
+bc_multiplier = DirichletBC(W.sub(1), p_exact, "on_boundary")
 
 # DG parameter
-s = Constant(1.0)
-beta = Constant(32.0)
+s = Constant(-1)  # -1 renders a symmetric formulation
+beta = Constant(6.0 * degree)
 h = CellDiameter(mesh)
 h_avg = avg(h)
 
@@ -56,13 +65,16 @@ h_avg = avg(h)
 a = dot(grad(u), grad(v)) * dx
 L = f * v * dx
 # Hybridization terms
-a += s * dot(grad(v), n)("+") * (u("+") - lambda_h("+")) * dS
-a += -dot(grad(u), n)("+") * (v("+") - mu_h("+")) * dS
-a += (beta / h_avg) * (u("+") - lambda_h("+")) * (v("+") - mu_h("+")) * dS
+# a += s * dot(grad(v), n)("+") * (u("+") - lambda_h("+")) * dS
+a += s * jump(grad(v), n) * (u("+") - lambda_h("+")) * dS
+# a += -dot(grad(u), n)("+") * (v("+") - mu_h("+")) * dS
+a += -jump(grad(u), n) * (v("+") - mu_h("+")) * dS
+a += (beta / h('+')) * (u("+") - lambda_h("+")) * (v("+") - mu_h("+")) * dS
 # Boundary terms
-# a += -dot(vel_projected, n) * v * ds  # How to set this bc??
-a += (beta / h) * (u - p_boundaries) * v * ds  # is this necessary?
-L += s * dot(grad(v), n) * p_boundaries * ds
+# a += -dot(sigma_e, n) * (v - mu_h) * ds  # How to set this bc??
+a += -dot(grad(u), n) * (v - mu_h) * ds
+a += (beta / h) * (sol_exact - lambda_h) * (v - mu_h) * ds  # is this necessary?
+a += s * dot(grad(v), n) * (sol_exact - lambda_h) * ds
 
 F = a - L
 
@@ -86,6 +98,7 @@ params = {
 }
 
 problem = NonlinearVariationalProblem(F, solution, bcs=bc_multiplier)
+# problem = NonlinearVariationalProblem(F, solution)
 solver = NonlinearVariationalSolver(problem, solver_parameters=params)
 solver.solve()
 

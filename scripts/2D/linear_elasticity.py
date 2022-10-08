@@ -1,7 +1,7 @@
 from firedrake import *
 import matplotlib.pyplot as plt
 from matplotlib import rc
-plt.rc('text', usetex=True)
+plt.rc('text')
 plt.rc('font', size=14)
 
 Lx, Ly = 1.0, 0.1
@@ -56,18 +56,56 @@ plt.show()
 # *** Plotting the displacement ***
 
 # Creating the figure object
-fig = plt.figure(dpi=300, figsize=(8, 6))
+fig, axes = plt.subplots(figsize=(20, 2))
 
 # Plotting the solution
-p = plot(u_h)
-p.set_aspect("equal")
+collection = quiver(u_h, axes=axes)
+fig.colorbar(collection)
+axes.set_aspect("equal")
 
 # Setting the xy-labels
-plt.xlabel(r'$x$ [L]')
-plt.ylabel(r'$y$ [L]')
+plt.xlabel('x [L]')
+plt.ylabel('y [L]')
+
+# Saving the figure
+plt.savefig("solution_displacement_quiver.png")
 
 # Displaying in the screen
 plt.show()
+
+# *** Plotting x-axis displacements ***
+
+fig, axes = plt.subplots(figsize=(10, 2))
+
+# Componente x
+collection = tripcolor(u_h.sub(0), axes=axes)
+fig.colorbar(collection)
+axes.set_aspect("equal")
+
+plt.xlabel('x [L]')
+plt.ylabel('y [L]')
+
+axes.set_xlim([0, 1])
+
+# plt.show()
+plt.savefig("solution_displacement_x.png")
+
+# *** Plotting y-axis displacements ***
+
+fig, axes = plt.subplots(figsize=(10, 2))
+
+# Componente x
+collection = tripcolor(u_h.sub(1), axes=axes)
+fig.colorbar(collection)
+axes.set_aspect("equal")
+
+plt.xlabel('x [L]')
+plt.ylabel('y [L]')
+
+axes.set_xlim([0, 1])
+
+# plt.show()
+plt.savefig("solution_displacement_y.png")
 
 # *** Plotting the bar deformation ***
 
@@ -76,10 +114,10 @@ displaced_coordinates = interpolate(SpatialCoordinate(mesh) + u_h, V)
 displaced_mesh = Mesh(displaced_coordinates)
 
 # Creating the figure object
-fig = plt.figure(dpi=300, figsize=(8, 6))
+fig, axes = plt.subplots(figsize=(8, 6))
 
 # Plotting the deformed mesh
-axes = plot(displaced_mesh)
+triplot(displaced_mesh, axes=axes)
 axes.set_aspect("equal")
 
 # Setting the xy-labels
@@ -88,4 +126,5 @@ plt.ylabel(r'$y$ [L]')
 
 # Displaying in the screen
 plt.tight_layout()
-plt.show()
+plt.savefig("displaced_mesh.png")
+# plt.show()

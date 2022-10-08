@@ -1,9 +1,6 @@
 from firedrake import *
 import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib import rc
-plt.rc('text', usetex=True)
-plt.rc('font', size=14)
 
 # Mesh definition
 numel_x = 10
@@ -27,7 +24,7 @@ g_bound = Constant(u_boundary)
 bcs = DirichletBC(V, g_bound, 'on_boundary')
 
 # Source term
-f = interpolate(Expression(1.0), V)
+f = interpolate(Constant(1.0), V)
 
 # Model parameters
 k = Constant(1e-8)
@@ -58,15 +55,15 @@ solver = LinearVariationalSolver(problem)
 solver.solve()
 
 # Displaying
-plot(u_sol, plot3d=True)
-plt.show()
+fig, axes = plt.subplots(subplot_kw={"projection": "3d"})
+collection = trisurf(u_sol, axes=axes, cmap='coolwarm')
+fig.colorbar(collection)
+axes.set_xlim([0, 1])
+axes.set_ylim([0, 1])
+plt.xlabel("x")
+plt.ylabel("y")
+plt.savefig("solution_pressure.png")
 
 # Writing the solution in pvd/vtu
-outfile = File("../outputs/ggls2d.pvd")
-outfile.write(u_sol)
-
-# Plotting the matrix entries for the case
-A = assemble(a, bcs=bcs)
-A_entries = A.M.values
-plt.spy(A_entries)
-plt.show()
+# outfile = File("../outputs/ggls2d.pvd")
+# outfile.write(u_sol)

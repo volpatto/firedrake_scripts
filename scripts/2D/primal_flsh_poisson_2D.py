@@ -23,7 +23,7 @@ comm = mesh.comm
 is_multiplier_continuous = False
 pressure_family = 'DQ' if use_quads else 'DG'
 velocity_family = 'DQ' if use_quads else 'DG'
-degree = 1
+degree = 2
 U = VectorFunctionSpace(mesh, velocity_family, degree)
 V = FunctionSpace(mesh, pressure_family, degree)
 V_exact = FunctionSpace(mesh, pressure_family, degree + 3)
@@ -34,13 +34,17 @@ if is_multiplier_continuous:
 else:
     trace_family = "HDiv Trace"
     T = FunctionSpace(mesh, trace_family, degree)
-W = V * T
+
+    LagrangeElement = FiniteElement("Lagrange", mesh.ufl_cell(), degree + 1)
+    C0TraceElement = LagrangeElement["facet"]
+    Q = FunctionSpace(mesh, C0TraceElement)
+W = V * T * Q
 
 # Trial and test functions
 solution = Function(W)
-p, lambda_h = split(solution)
-# p, lambda_h = TrialFunctions(W)
-q, mu_h  = TestFunctions(W)
+p, lambda_h, phi_h = split(solution)
+# p, lambda_h, phi_h = TrialFunctions(W)
+q, mu_h, psi_h  = TestFunctions(W)
 
 # Mesh entities
 n = FacetNormal(mesh)
@@ -48,10 +52,9 @@ h = CellDiameter(mesh)
 x, y = SpatialCoordinate(mesh)
 
 # Exact solution
-p_exact = sin(2 * pi * x) * sin(2 * pi * y)
+# p_exact = sin(2 * pi * x) * sin(2 * pi * y)
 # p_exact = sin(0.5 * pi * x) * sin(0.5 * pi * y)
-# p_exact = x * x * x - 3 * x * y * y
-# p_exact = - (x * x / 2 - x * x * x / 3) * (y * y / 2 - y * y * y / 3)
+p_exact = x * x * x - 3 * x * y * y
 # p_exact = 1 + x + y
 # p_exact = 1 + x + y + x * y + x * x - y * y + x * x * x - 3 * x * y * y
 exact_solution = Function(V_exact).interpolate(p_exact)
@@ -61,7 +64,7 @@ sigma_e.interpolate(-grad(p_exact))
 
 # Forcing function
 f_expression = div(-grad(p_exact))
-f = Function(V_exact).project(f_expression)
+f = Function(V_exact).interpolate(f_expression)
 
 # Dirichlet BCs
 bc_multiplier = DirichletBC(W.sub(1), p_exact, "on_boundary")
@@ -72,13 +75,15 @@ beta = beta_0 / h
 # beta = beta_0
 
 # Stabilizing parameter
-delta_base = h * h
-# delta_base = Constant(1)
+# delta_base = h * h
+delta_base = Constant(1)
 delta_0 = Constant(1)
 delta_1 = delta_base * Constant(1)
 # delta_2 = delta_base * Constant(1) / h
-delta_2 = Constant(1e1 * degree * degree) / h / h
-delta_3 = 1 / Constant(1e5 * degree * degree) * Constant(0)
+edge_base = Constant(1e1 * degree * degree)
+delta_2 = edge_base / h * Constant(1e0)
+# delta_3 = delta_2
+delta_3 = 1 / edge_base * h * Constant(1e0)
 # delta_2 = beta
 # delta_2 = delta_1 * Constant(1)  # so far this is the best combination
 
@@ -87,42 +92,40 @@ u = -grad(p)
 v = -grad(q)
 
 # Symmetry parameter: s = 1 (symmetric) or s = -1 (unsymmetric). Disable with 0.
-s = Constant(1)
+s = Constant(0)
 
 # Numerical flux trace
-u_hat = u + beta * (p - lambda_h) * n
+# u_hat = u + beta * (p - lambda_h) * n
 # u_hat = u
 
 # Classical term
-a = delta_0 * dot(grad(p), grad(q)) * dx + delta_0('+') * jump(u_hat, n) * q("+") * dS
+a = delta_0 * dot(grad(p), grad(q)) * dx + delta_0('+') * phi_h("+") * q("+") * dS
 # a += delta_0 * dot(u_hat, n) * q * ds
-a += delta_0 * dot(u, n) * q * ds + delta_0 * beta * (p - exact_solution) * q * ds  # expand u_hat product in ds
+# a += delta_0 * (phi_h - dot(sigma_e, n)) * q * ds
 L = delta_0 * f * q * dx
 
 # Mass balance least-square
 a += delta_1 * div(u) * div(v) * dx
-a += delta_1 * inner(curl(u), curl(v)) * dx
+# a += delta_1 * inner(curl(u), curl(v)) * dx
 L += delta_1 * f * div(v) * dx
 
 # Hybridization terms
-mu_const = Constant(-1)
-a += mu_const * mu_h("+") * jump(u_hat, n=n) * dS
-# a += mu_const * mu_h * (lambda_h - exact_solution) * ds
+# a += psi_h("+") * phi_h("+") * dS
+# a += mu_h * (lambda_h - exact_solution) * ds
 # a += mu_h * dot(u_hat - grad(exact_solution), n) * ds
 
 # Least-Squares on constrains
 a += delta_2("+") * (p("+") - lambda_h("+")) * (q("+") - mu_h("+")) * dS
+a += delta_3("+") * (jump(u, n=n) - phi_h("+")) * (jump(v, n=n) - psi_h("+")) * dS
 # a += delta_2 * (p - exact_solution) * (q - mu_h) * ds  # needed if not included as strong BC
-# a += delta_3('+') * dot(u_hat('+'), n('+')) * dot(v('+'), n('+')) * dS
-a += delta_3('+') * jump(u_hat, n=n) * jump(v, n=n) * dS
-# a += delta_3 * dot(u_hat, n) * dot(v, n) * ds  # should not be present in Dirichlet boundaries
-# L += delta_3 * dot(sigma_e, n) * dot(v, n) * ds   # should not be present in Dirichlet boundaries
 a += delta_2 * (p - exact_solution) * q * ds  # needed if not included as strong BC
 a += delta_2 * (lambda_h - exact_solution) * mu_h * ds  # needed if not included as strong BC
+# a += delta_3 * (dot(u, n) - dot(sigma_e, n)) * dot(v, n) * ds
+a += delta_3 * (phi_h - dot(sigma_e, n)) * psi_h * ds
 
 # Consistent symmetrization
-a += s * delta_0 * jump(v, n) * (p('+') - lambda_h("+")) * dS
-a += s * delta_0 * dot(v, n) * (p - exact_solution) * ds
+a += s * delta_0 * psi_h("+") * (p('+') - lambda_h("+")) * dS
+a += s * delta_0 * psi_h * (p - exact_solution) * ds
 
 # Symmetrization based on flux continuity (alternative) -- doesn't work
 # a += -lambda_h('+') * jump(v, n) * dS
@@ -143,7 +146,7 @@ params = {
     # Use the static condensation PC for hybridized problems
     # and use a direct solve on the reduced system for lambda_h
     "pc_python_type": "firedrake.SCPC",
-    "pc_sc_eliminate_fields": "0",
+    "pc_sc_eliminate_fields": "0, 2",
     "condensed_field": {
         "ksp_type": "preonly",
         # 'ksp_view': None,
@@ -179,7 +182,7 @@ PETSc.Sys.Print("Solver finished.\n")
 # solver.solve()
 # print("Solver finished.\n")
 
-u_h, lambda_h = solution.split()
+u_h, lambda_h, phi_h = solution.split()
 sigma_h = Function(U, name='Velocity')
 sigma_h.interpolate(-grad(u_h))
 sigma_h.rename('Velocity', 'label')

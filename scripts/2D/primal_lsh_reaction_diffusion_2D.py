@@ -1,3 +1,4 @@
+from curses import KEY_BEG
 from firedrake import *
 import matplotlib
 import matplotlib.pyplot as plt
@@ -16,7 +17,7 @@ PETSc.Log.begin()
 # Defining the mesh
 N = 10
 use_quads = False
-mesh = UnitSquareMesh(N, N, quadrilateral=use_quads)
+mesh = UnitSquareMesh(N, N, quadrilateral=use_quads, diagonal="left")
 comm = mesh.comm
 
 # Function space declaration
@@ -24,7 +25,7 @@ is_multiplier_continuous = False
 pressure_family = 'DQ' if use_quads else 'DG'
 velocity_family = 'DQ' if use_quads else 'DG'
 degree = 1
-U = VectorFunctionSpace(mesh, velocity_family, degree)
+U = VectorFunctionSpace(mesh, velocity_family, degree - 1)
 V = FunctionSpace(mesh, pressure_family, degree)
 V_exact = FunctionSpace(mesh, pressure_family, degree + 3)
 if is_multiplier_continuous:
@@ -39,7 +40,7 @@ W = V * T
 # Trial and test functions
 solution = Function(W)
 p, lambda_h = split(solution)
-# p, lambda_h = TrialFunctions(W)
+# u, p, lambda_h = TrialFunctions(W)
 q, mu_h  = TestFunctions(W)
 
 # Mesh entities
@@ -48,89 +49,87 @@ h = CellDiameter(mesh)
 x, y = SpatialCoordinate(mesh)
 
 # Exact solution
-p_exact = sin(2 * pi * x) * sin(2 * pi * y)
-# p_exact = sin(0.5 * pi * x) * sin(0.5 * pi * y)
-# p_exact = x * x * x - 3 * x * y * y
-# p_exact = - (x * x / 2 - x * x * x / 3) * (y * y / 2 - y * y * y / 3)
-# p_exact = 1 + x + y
-# p_exact = 1 + x + y + x * y + x * x - y * y + x * x * x - 3 * x * y * y
+p_exact = conditional(
+    And(gt(x, 0), lt(x, 0.5)),
+    conditional(And(gt(y, 0), lt(y, 1)), Constant(1), Constant(0)),
+    Constant(0)
+)
 exact_solution = Function(V_exact).interpolate(p_exact)
 exact_solution.rename("Exact pressure", "label")
-sigma_e = Function(U, name='Exact velocity')
-sigma_e.interpolate(-grad(p_exact))
 
 # Forcing function
-f_expression = div(-grad(p_exact))
-f = Function(V_exact).project(f_expression)
+f_expression = p_exact
+f = Function(V).project(f_expression)
 
 # Dirichlet BCs
-bc_multiplier = DirichletBC(W.sub(1), p_exact, "on_boundary")
+bc_multiplier = DirichletBC(W.sub(1), Constant(0), "on_boundary")
+
+# Reaction and Diffusion coefficients
+K = Constant(1e-8)
+D = Constant(1)
 
 # Hybridization parameter
-beta_0 = Constant(0 * degree * degree)  # should not be zero when used with LS terms
+beta_0 = Constant(K * degree * degree)  # should not be zero when used with LS terms
 beta = beta_0 / h
 # beta = beta_0
 
+# GGLS stabilization parameters
+alpha = (D * h * h) / (6.0 * K)
+eps = conditional(ge(alpha, 8), 1, conditional(ge(alpha, 1), 0.064 * alpha + 0.49, 0))
+tau = (eps * (h * h)) / (6.0 * D)
+
 # Stabilizing parameter
-delta_base = h * h
-# delta_base = Constant(1)
-delta_0 = Constant(1)
-delta_1 = delta_base * Constant(1)
+# delta_base = h * h
+delta_base = Constant(1)
+delta_0 = delta_base * Constant(1)
+delta_1 = delta_base * Constant(0)
 # delta_2 = delta_base * Constant(1) / h
-delta_2 = Constant(1e1 * degree * degree) / h / h
-delta_3 = 1 / Constant(1e5 * degree * degree) * Constant(0)
+delta_2 = Constant(K * degree * degree) / h * Constant(0)
 # delta_2 = beta
 # delta_2 = delta_1 * Constant(1)  # so far this is the best combination
+delta_3 = tau * delta_base * Constant(0)
 
 # Flux variables
-u = -grad(p)
-v = -grad(q)
+u = -K * grad(p)
+v = -K * grad(q)
 
 # Symmetry parameter: s = 1 (symmetric) or s = -1 (unsymmetric). Disable with 0.
-s = Constant(1)
+s = Constant(-1)
 
 # Numerical flux trace
 u_hat = u + beta * (p - lambda_h) * n
-# u_hat = u
 
 # Classical term
-a = delta_0 * dot(grad(p), grad(q)) * dx + delta_0('+') * jump(u_hat, n) * q("+") * dS
+a = delta_0 * dot(K * grad(p), grad(q)) * dx + delta_0 * D * p * q * dx
+a += delta_0('+') * jump(u_hat, n) * q("+") * dS
 # a += delta_0 * dot(u_hat, n) * q * ds
 a += delta_0 * dot(u, n) * q * ds + delta_0 * beta * (p - exact_solution) * q * ds  # expand u_hat product in ds
 L = delta_0 * f * q * dx
 
-# Mass balance least-square
-a += delta_1 * div(u) * div(v) * dx
-a += delta_1 * inner(curl(u), curl(v)) * dx
-L += delta_1 * f * div(v) * dx
+# Mass balance least-squares
+a += delta_1 * (div(u) + D * p) * (div(v) + D * q) * dx
+L += delta_1 * f * (div(v) + D * q) * dx
+
+# Gradient mass balance least-squares
+a += delta_3 * inner(grad(div(u) + D * p), grad(div(v) + D * q)) * dx
+L += delta_3 * inner(grad(f), grad(div(v) + D * q)) * dx
 
 # Hybridization terms
-mu_const = Constant(-1)
-a += mu_const * mu_h("+") * jump(u_hat, n=n) * dS
-# a += mu_const * mu_h * (lambda_h - exact_solution) * ds
+a += -mu_h("+") * jump(u_hat, n=n) * dS
+a += mu_h * (lambda_h - exact_solution) * ds
 # a += mu_h * dot(u_hat - grad(exact_solution), n) * ds
 
 # Least-Squares on constrains
 a += delta_2("+") * (p("+") - lambda_h("+")) * (q("+") - mu_h("+")) * dS
 # a += delta_2 * (p - exact_solution) * (q - mu_h) * ds  # needed if not included as strong BC
-# a += delta_3('+') * dot(u_hat('+'), n('+')) * dot(v('+'), n('+')) * dS
-a += delta_3('+') * jump(u_hat, n=n) * jump(v, n=n) * dS
-# a += delta_3 * dot(u_hat, n) * dot(v, n) * ds  # should not be present in Dirichlet boundaries
-# L += delta_3 * dot(sigma_e, n) * dot(v, n) * ds   # should not be present in Dirichlet boundaries
 a += delta_2 * (p - exact_solution) * q * ds  # needed if not included as strong BC
 a += delta_2 * (lambda_h - exact_solution) * mu_h * ds  # needed if not included as strong BC
 
 # Consistent symmetrization
-a += s * delta_0 * jump(v, n) * (p('+') - lambda_h("+")) * dS
+a += s * delta_0('+') * jump(v, n) * (p('+') - lambda_h("+")) * dS
 a += s * delta_0 * dot(v, n) * (p - exact_solution) * ds
 
-# Symmetrization based on flux continuity (alternative) -- doesn't work
-# a += -lambda_h('+') * jump(v, n) * dS
-# L += -exact_solution * dot(v, n) * ds
-
 F = a - L
-# A = lhs(F)
-# b = rhs(F)
 
 # Solving with Static Condensation
 PETSc.Sys.Print("*******************************************\nSolving using static condensation.\n")
@@ -162,71 +161,47 @@ solver.snes.ksp.setConvergenceHistory()
 solver.solve()
 PETSc.Sys.Print("Solver finished.\n")
 
-# Solving fully coupled system
-# print("*******************************************\nSolving fully coupled system.\n")
-# solver_parameters = {
-#     "ksp_monitor": None,
-#     "mat_type": "aij",
-#     "ksp_type": "preonly",
-#     "pc_type": "lu",
-#     "pc_factor_mat_solver_type": "mumps",
-# }
-# solution = Function(W)
-# # problem = LinearVariationalProblem(a, L, solution, bcs=[bc_multiplier])
-# problem = LinearVariationalProblem(A, b, solution, bcs=[])
-# solver = LinearVariationalSolver(problem, solver_parameters=solver_parameters)
-# solver.snes.ksp.setConvergenceHistory()
-# solver.solve()
-# print("Solver finished.\n")
-
 u_h, lambda_h = solution.split()
 sigma_h = Function(U, name='Velocity')
 sigma_h.interpolate(-grad(u_h))
 sigma_h.rename('Velocity', 'label')
 u_h.rename('Pressure', 'label')
 
-# Plotting velocity field exact solution
-fig, axes = plt.subplots()
-collection = quiver(sigma_e, axes=axes, cmap='coolwarm')
-fig.colorbar(collection)
-plt.xlabel("x")
-plt.ylabel("y")
-plt.title("Exact solution for velocity")
-plt.savefig("exact_velocity.png")
-# plt.show()
-
 # Plotting pressure field exact solution
-fig, axes = plt.subplots()
-collection = tripcolor(exact_solution, axes=axes, cmap='coolwarm')
-fig.colorbar(collection)
+fig, axes = plt.subplots(subplot_kw={"projection": "3d"})
+collection = trisurf(exact_solution, axes=axes, cmap='coolwarm')
+fig.colorbar(
+    collection,
+    orientation="horizontal",
+    shrink=0.6, 
+    pad=0.1, 
+    label="exact solution"
+)
 axes.set_xlim([0, 1])
 axes.set_ylim([0, 1])
 plt.xlabel("x")
 plt.ylabel("y")
 plt.title("Exact solution for pressure")
+plt.tight_layout()
 plt.savefig("exact_pressure.png")
 # plt.show()
 
-# Plotting velocity field numerical solution
-fig, axes = plt.subplots()
-collection = quiver(sigma_h, axes=axes, cmap='coolwarm')
-fig.colorbar(collection)
-plt.xlabel("x")
-plt.ylabel("y")
-plt.savefig("solution_velocity.png")
-# plt.show()
-
-# Plotting pressure field numerical solution
-fig, axes = plt.subplots()
-collection = tripcolor(u_h, axes=axes, cmap='coolwarm')
-# triplot(mesh, axes=axes)
-fig.colorbar(collection)
+fig, axes = plt.subplots(subplot_kw={"projection": "3d"})
+collection = trisurf(u_h, axes=axes, cmap='coolwarm')
+cbar = fig.colorbar(
+    collection,
+    orientation="horizontal",
+    shrink=0.6, 
+    pad=0.1, 
+    label="primal variable",
+)
 axes.set_xlim([0, 1])
 axes.set_ylim([0, 1])
+# plt.clim(0, 1.05)
 plt.xlabel("x")
 plt.ylabel("y")
+plt.tight_layout()
 plt.savefig("solution_pressure.png")
-# plt.show()
 
 # Plotting the mesh
 fig, axes = plt.subplots()
