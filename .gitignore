@@ -2,6 +2,7 @@
 *.pvd
 *.vtu
 *.png
+*.csv
 
 # Folders
 .ipynb_checkpoints/
