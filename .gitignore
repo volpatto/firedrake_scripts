@@ -10,3 +10,7 @@ outputs/
 .history/
 .vscode/
 .pytest_cache/
+seminario/
+conv_result/
+conv_rate_results/
+cond_number_results/
