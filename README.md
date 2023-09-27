@@ -1,4 +1,4 @@
-# Firedrake Scripts
+# Firedrake Scripts (NOTE: this repo is not being tested following `firedrake` updates)
 
 This repo contains several MWE (minimal working examples) scripts which exemplify the usage of Finite Element Methods (FEM)
 to solve some problems I faced around or the ones I found interest. The implementation
