@@ -10,3 +10,4 @@ outputs/
 .history/
 .vscode/
 .pytest_cache/
+tmp/
